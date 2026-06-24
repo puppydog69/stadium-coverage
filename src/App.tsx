@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import * as h3 from 'h3-js';
+import type { Feature, FeatureCollection, Point } from 'geojson';
 import { selectOptimalLocations } from './lib/optimizer';
 import type { Candidate, SelectedCandidate } from './lib/optimizer';
 import './App.css';
@@ -87,7 +88,7 @@ function buildDotGeoJSON(
   candidates: Candidate[],
   selected: SelectedCandidate[],
   colorMap: Map<string, string>,
-): GeoJSON.FeatureCollection {
+): FeatureCollection {
   const selMap = new Map(selected.map(s => [s.name, s]));
   return {
     type: 'FeatureCollection',
@@ -114,8 +115,8 @@ function buildDotGeoJSON(
 function buildHexGeoJSON(
   selected: SelectedCandidate[],
   colorMap: Map<string, string>,
-): GeoJSON.FeatureCollection {
-  const features: GeoJSON.Feature[] = [];
+): FeatureCollection {
+  const features: Feature[] = [];
   for (const s of selected) {
     const color = colorMap.get(s.name) ?? PALETTE[0];
     for (const hexId of s.hexIds) {
@@ -132,7 +133,7 @@ function buildHexGeoJSON(
   return { type: 'FeatureCollection', features };
 }
 
-function emptyFC(): GeoJSON.FeatureCollection {
+function emptyFC(): FeatureCollection {
   return { type: 'FeatureCollection', features: [] };
 }
 
@@ -292,7 +293,7 @@ export default function App() {
         }
         map.getCanvas().style.cursor = 'pointer';
         const props  = f.properties as DotProps;
-        const coords = (f.geometry as GeoJSON.Point).coordinates as [number, number];
+        const coords = (f.geometry as Point).coordinates as [number, number];
         popupRef.current?.remove();
         popupRef.current = new maplibregl.Popup({
           closeButton: false,
@@ -310,7 +311,7 @@ export default function App() {
         const f = sel[0] ?? unsel[0];
         if (!f) return;
         const props  = f.properties as DotProps;
-        const coords = (f.geometry as GeoJSON.Point).coordinates as [number, number];
+        const coords = (f.geometry as Point).coordinates as [number, number];
         new maplibregl.Popup({ offset: 10 })
           .setLngLat(coords)
           .setHTML(tooltipHTML(props))
