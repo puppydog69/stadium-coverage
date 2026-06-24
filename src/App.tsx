@@ -23,18 +23,18 @@ const LAYER_SELECTED    = 'selected-circle';
 const US_POPULATION = 335_000_000;
 
 const PALETTE = [
-  '#818cf8', // indigo
-  '#34d399', // emerald
-  '#f472b6', // pink
-  '#fb923c', // orange
-  '#38bdf8', // sky
-  '#a78bfa', // violet
-  '#4ade80', // green
-  '#f87171', // red
-  '#facc15', // yellow
-  '#60a5fa', // blue
-  '#e879f9', // fuchsia
-  '#2dd4bf', // teal
+  '#ff4d6d', // vivid red-pink
+  '#00d2ff', // electric cyan
+  '#ffe94d', // bright yellow
+  '#7c3aff', // deep violet
+  '#00e5a0', // neon green
+  '#ff8c00', // vivid orange
+  '#e040fb', // hot magenta
+  '#00bfff', // dodger blue
+  '#ff6b35', // coral orange
+  '#39ff14', // neon lime
+  '#ff1493', // deep pink
+  '#00fff5', // aqua
 ];
 
 const NEARBY_KM = 300;
@@ -114,7 +114,7 @@ function buildDotGeoJSON(
           selected: sel !== undefined,
           rank: sel?.rank ?? 0,
           incrementalPopulation: sel?.incrementalPopulation ?? 0,
-          color: sel ? (colorMap.get(c.name) ?? PALETTE[0]) : '#334155',
+          color: sel ? (colorMap.get(c.name) ?? PALETTE[0]) : '#3d4f6b',
         } satisfies DotProps,
       };
     }),
@@ -236,7 +236,7 @@ export default function App() {
         source: SOURCE_HEXES,
         paint: {
           'fill-color': ['get', 'color'],
-          'fill-opacity': 0.3,
+          'fill-opacity': 0.38,
         },
       });
 

@@ -25,20 +25,20 @@
   z-index: 10;
   display: flex;
   flex-direction: column;
-  background: rgba(8, 8, 22, 0.82);
-  backdrop-filter: blur(28px) saturate(160%);
-  -webkit-backdrop-filter: blur(28px) saturate(160%);
-  border-right: 1px solid rgba(255, 255, 255, 0.07);
-  box-shadow: 4px 0 40px rgba(0, 0, 0, 0.7);
+  background: rgba(22, 26, 54, 0.88);
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 4px 0 36px rgba(0, 0, 0, 0.55);
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 13px;
-  color: #c8d0e0;
+  color: #d4daf0;
 }
 
 /* ── Panel header ────────────────────────────────────────────────── */
 .panel-header {
   padding: 20px 18px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
   flex-shrink: 0;
 }
 
@@ -159,7 +159,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .radius-btn:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.08);
-  color: #c8d0e0;
+  color: #d4daf0;
 }
 
 .radius-btn.active {
@@ -254,8 +254,8 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 
 .stat-card {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 8px;
   padding: 10px 10px 8px;
   display: flex;
@@ -308,8 +308,8 @@ input[type="range"]::-webkit-slider-thumb:hover {
   align-items: center;
   padding: 7px 8px;
   border-radius: 7px;
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.07);
   position: relative;
   overflow: hidden;
   transition: background 0.15s;
