@@ -11,31 +11,32 @@ import './App.css';
 // Constants
 // ---------------------------------------------------------------------------
 
-const MAP_STYLE     = 'https://demotiles.maplibre.org/style.json';
+const MAP_STYLE     = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
 const SOURCE_DOTS   = 'candidates';
 const SOURCE_HEXES  = 'hexes';
-const LAYER_HEX_FILL   = 'hex-fill';
-const LAYER_HEX_STROKE = 'hex-stroke';
-const LAYER_UNSELECTED = 'unselected-circle';
-const LAYER_SELECTED   = 'selected-circle';
+const LAYER_HEX_FILL    = 'hex-fill';
+const LAYER_HEX_STROKE  = 'hex-stroke';
+const LAYER_SEL_GLOW    = 'selected-glow';
+const LAYER_UNSELECTED  = 'unselected-circle';
+const LAYER_SELECTED    = 'selected-circle';
 
-// 12 perceptually distinct colors for candidate regions
+const US_POPULATION = 335_000_000;
+
 const PALETTE = [
-  '#e03131', // red
-  '#1971c2', // blue
-  '#2f9e44', // green
-  '#9c36b5', // purple
-  '#f08c00', // amber
-  '#0c8599', // teal
-  '#c2255c', // pink
-  '#5c940d', // lime
-  '#e67700', // orange
-  '#1098ad', // cyan
-  '#6741d9', // violet
-  '#d9480f', // deep orange
+  '#818cf8', // indigo
+  '#34d399', // emerald
+  '#f472b6', // pink
+  '#fb923c', // orange
+  '#38bdf8', // sky
+  '#a78bfa', // violet
+  '#4ade80', // green
+  '#f87171', // red
+  '#facc15', // yellow
+  '#60a5fa', // blue
+  '#e879f9', // fuchsia
+  '#2dd4bf', // teal
 ];
 
-// Two selected candidates sharing hexes (or within ~300 km) should use different colors.
 const NEARBY_KM = 300;
 
 // ---------------------------------------------------------------------------
@@ -53,9 +54,17 @@ interface DotProps {
   color: string;
 }
 
+type ResultRow = SelectedCandidate & { color: string };
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function fmtPop(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (n >= 1_000) return Math.round(n / 1_000) + 'K';
+  return n.toLocaleString();
+}
 
 function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371;
@@ -105,7 +114,7 @@ function buildDotGeoJSON(
           selected: sel !== undefined,
           rank: sel?.rank ?? 0,
           incrementalPopulation: sel?.incrementalPopulation ?? 0,
-          color: sel ? (colorMap.get(c.name) ?? PALETTE[0]) : '#94a3b8',
+          color: sel ? (colorMap.get(c.name) ?? PALETTE[0]) : '#334155',
         } satisfies DotProps,
       };
     }),
@@ -122,7 +131,7 @@ function buildHexGeoJSON(
     for (const hexId of s.hexIds) {
       const boundary = h3.cellToBoundary(hexId); // [[lat, lng], ...]
       const ring: [number, number][] = boundary.map(([lat, lng]) => [lng, lat]);
-      ring.push(ring[0]); // close GeoJSON ring
+      ring.push(ring[0]);
       features.push({
         type: 'Feature',
         geometry: { type: 'Polygon', coordinates: [ring] },
@@ -141,17 +150,15 @@ function tooltipHTML(props: DotProps): string {
   if (props.selected) {
     return (
       `<strong>#${props.rank} – ${props.name}</strong><br/>` +
-      `State: ${props.state}<br/>` +
-      `<em>New pop covered: <strong>${props.incrementalPopulation.toLocaleString()}</strong></em><br/>` +
-      `Total 15-min pop: ${props.population.toLocaleString()}<br/>` +
-      `Hex count: ${props.hexCount}`
+      `${props.state} &nbsp;·&nbsp; ${props.hexCount} hexes<br/>` +
+      `<span style="color:#a5b4fc">+${props.incrementalPopulation.toLocaleString()} new</span><br/>` +
+      `<span style="opacity:.6">15-min reach: ${props.population.toLocaleString()}</span>`
     );
   }
   return (
     `<strong>${props.name}</strong><br/>` +
-    `State: ${props.state}<br/>` +
-    `15-min pop: ${props.population.toLocaleString()}<br/>` +
-    `Hex count: ${props.hexCount}`
+    `${props.state} &nbsp;·&nbsp; ${props.hexCount} hexes<br/>` +
+    `<span style="opacity:.6">15-min pop: ${props.population.toLocaleString()}</span>`
   );
 }
 
@@ -173,34 +180,31 @@ export default function App() {
   const [N, setN]               = useState(20);
   const [transitOn, setTransitOn] = useState(false);
   const [radius, setRadius]     = useState<Radius>(15);
-  const [summary, setSummary]   = useState({ count: 0, totalPop: 0 });
+  const [results, setResults]   = useState<ResultRow[]>([]);
 
-  // Run optimizer and push updated GeoJSON to both map sources
   const runAndUpdate = useCallback((n: number, transit: boolean) => {
-    const map      = mapRef.current;
-    const cands    = candidatesRef.current;
+    const map       = mapRef.current;
+    const cands     = candidatesRef.current;
     const popLookup = popLookupRef.current;
     if (!map || !cands || !popLookup || !mapReadyRef.current) return;
 
     const tagged   = cands.map(c => ({ ...c, mode: transit ? 'transit' : 'driving' }));
     const selected = selectOptimalLocations(tagged, popLookup, n, transit ? 2 : 1);
-    const totalPop = selected.reduce((s, r) => s + r.incrementalPopulation, 0);
-    setSummary({ count: selected.length, totalPop });
-
     const colorMap = assignColors(selected, PALETTE);
+
+    setResults(selected.map(s => ({ ...s, color: colorMap.get(s.name) ?? PALETTE[0] })));
+
     (map.getSource(SOURCE_DOTS) as maplibregl.GeoJSONSource)
       .setData(buildDotGeoJSON(cands, selected, colorMap));
     (map.getSource(SOURCE_HEXES) as maplibregl.GeoJSONSource)
       .setData(buildHexGeoJSON(selected, colorMap));
   }, []);
 
-  // Keep params ref current; re-run optimizer on N or transit change
   useEffect(() => {
     paramsRef.current = { N, transitOn };
     runAndUpdate(N, transitOn);
   }, [N, transitOn, runAndUpdate]);
 
-  // Initialize map (runs once)
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
@@ -211,7 +215,7 @@ export default function App() {
       zoom: 3.8,
     });
     mapRef.current = map;
-    map.addControl(new maplibregl.NavigationControl(), 'top-right');
+    map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
 
     map.on('load', async () => {
       const [candRes, popRes] = await Promise.all([
@@ -223,7 +227,7 @@ export default function App() {
       candidatesRef.current = candidates;
       popLookupRef.current  = popLookup;
 
-      // --- Hex polygon source (bottom layer) ---
+      // Hex polygon layers (bottom)
       map.addSource(SOURCE_HEXES, { type: 'geojson', data: emptyFC() });
 
       map.addLayer({
@@ -232,25 +236,41 @@ export default function App() {
         source: SOURCE_HEXES,
         paint: {
           'fill-color': ['get', 'color'],
-          'fill-opacity': 0.45,
+          'fill-opacity': 0.3,
         },
       });
 
+      // Glowing hex border via line-blur
       map.addLayer({
         id: LAYER_HEX_STROKE,
         type: 'line',
         source: SOURCE_HEXES,
         paint: {
           'line-color': ['get', 'color'],
-          'line-width': 0.4,
-          'line-opacity': 0.6,
+          'line-width': 1.5,
+          'line-opacity': 0.9,
+          'line-blur': 2,
         },
       });
 
-      // --- Dot source (top layers) ---
+      // Dot source
       map.addSource(SOURCE_DOTS, {
         type: 'geojson',
         data: buildDotGeoJSON(candidates, [], new Map()),
+      });
+
+      // Soft glow halo behind selected dots
+      map.addLayer({
+        id: LAYER_SEL_GLOW,
+        type: 'circle',
+        source: SOURCE_DOTS,
+        filter: ['==', ['get', 'selected'], true],
+        paint: {
+          'circle-radius': 20,
+          'circle-color': ['get', 'color'],
+          'circle-opacity': 0.12,
+          'circle-blur': 1,
+        },
       });
 
       map.addLayer({
@@ -259,11 +279,11 @@ export default function App() {
         source: SOURCE_DOTS,
         filter: ['!=', ['get', 'selected'], true],
         paint: {
-          'circle-radius': 4,
-          'circle-color': '#94a3b8',
+          'circle-radius': 3.5,
+          'circle-color': '#334155',
           'circle-stroke-width': 1,
-          'circle-stroke-color': '#fff',
-          'circle-opacity': 0.55,
+          'circle-stroke-color': 'rgba(255,255,255,0.12)',
+          'circle-opacity': 0.6,
         },
       });
 
@@ -273,15 +293,15 @@ export default function App() {
         source: SOURCE_DOTS,
         filter: ['==', ['get', 'selected'], true],
         paint: {
-          'circle-radius': 9,
+          'circle-radius': 8,
           'circle-color': ['get', 'color'],
           'circle-stroke-width': 2,
-          'circle-stroke-color': '#fff',
+          'circle-stroke-color': 'rgba(255,255,255,0.85)',
           'circle-opacity': 1,
         },
       });
 
-      // Unified hover: selected dot > unselected dot > no feature
+      // Unified hover: selected takes priority over unselected
       map.on('mousemove', e => {
         const sel   = map.queryRenderedFeatures(e.point, { layers: [LAYER_SELECTED] });
         const unsel = map.queryRenderedFeatures(e.point, { layers: [LAYER_UNSELECTED] });
@@ -318,7 +338,6 @@ export default function App() {
           .addTo(map);
       });
 
-      // First optimizer run
       mapReadyRef.current = true;
       const { N: n, transitOn: t } = paramsRef.current;
       runAndUpdate(n, t);
@@ -327,68 +346,150 @@ export default function App() {
     return () => {
       popupRef.current?.remove();
       map.remove();
-      mapRef.current    = null;
+      mapRef.current      = null;
       mapReadyRef.current = false;
     };
   }, [runAndUpdate]);
+
+  // Derived stats
+  const totalPop = results.reduce((s, r) => s + r.incrementalPopulation, 0);
+  const usPct    = totalPop > 0 ? ((totalPop / US_POPULATION) * 100).toFixed(1) : '—';
+  const avgPop   = results.length > 0 ? Math.round(totalPop / results.length) : 0;
+  const best     = results[0];
+  const worst    = results[results.length - 1];
+
+  // Cumulative population for leaderboard
+  let cum = 0;
+  const resultsWithCum = results.map(r => {
+    cum += r.incrementalPopulation;
+    return { ...r, cumulative: cum };
+  });
 
   return (
     <>
       <div ref={containerRef} id="map" />
 
       <div id="panel">
-        <div className="panel-title">Stadium Coverage Optimizer</div>
-
-        <label className="panel-label">
-          Venues: <strong>{N}</strong>
-          <input
-            type="range"
-            min={5} max={50} step={1}
-            value={N}
-            onChange={e => setN(Number(e.target.value))}
-          />
-        </label>
-
-        <div className="panel-label">
-          <span>Drive time</span>
-          <div className="radius-group">
-            {([15, 30, 60] as Radius[]).map(r => (
-              <button
-                key={r}
-                className={`radius-btn${radius === r ? ' active' : ''}${r !== 15 ? ' soon' : ''}`}
-                disabled={r !== 15}
-                onClick={() => setRadius(r)}
-                title={r !== 15 ? 'Coming soon — precomputing isochrones' : `${r}-min drive`}
-              >
-                {r} min{r !== 15 ? ' *' : ''}
-              </button>
-            ))}
+        <div className="panel-header">
+          <div className="panel-title">Stadium Coverage</div>
+          <div className="panel-subtitle">US Population Optimizer</div>
+          <div className="legend-row" style={{ marginTop: 10 }}>
+            <div className="legend-item">
+              <span className="dot dot-palette" />
+              Selected
+            </div>
+            <div className="legend-item">
+              <span className="dot dot-unselected" />
+              Candidate
+            </div>
           </div>
-          {radius !== 15 && (
-            <span className="soon-note">* 30 / 60-min data coming soon</span>
-          )}
         </div>
 
-        <label className="panel-label toggle-row">
-          <input
-            type="checkbox"
-            checked={transitOn}
-            onChange={e => setTransitOn(e.target.checked)}
-          />
-          Transit bonus (2×)
-        </label>
+        <div className="panel-body">
+          {/* Controls */}
+          <div className="controls-section">
+            <div className="ctrl-label">
+              <div className="ctrl-label-row">
+                <span>Venues</span>
+                <span className="ctrl-value">{N}</span>
+              </div>
+              <input
+                type="range"
+                min={5} max={50} step={1}
+                value={N}
+                onChange={e => setN(Number(e.target.value))}
+              />
+            </div>
 
-        {summary.count > 0 && (
-          <div className="panel-summary">
-            <div>Selected: <strong>{summary.count}</strong> venues</div>
-            <div>Pop covered: <strong>{summary.totalPop.toLocaleString()}</strong></div>
+            <div className="ctrl-label">
+              <div className="ctrl-label-row">
+                <span>Drive time</span>
+              </div>
+              <div className="radius-group">
+                {([15, 30, 60] as Radius[]).map(r => (
+                  <button
+                    key={r}
+                    className={`radius-btn${radius === r ? ' active' : ''}`}
+                    disabled={r !== 15}
+                    onClick={() => setRadius(r)}
+                    title={r !== 15 ? 'Coming soon' : `${r}-min drive`}
+                  >
+                    {r} min
+                  </button>
+                ))}
+              </div>
+              {radius !== 15 && (
+                <span className="soon-note">30 / 60-min data coming soon</span>
+              )}
+            </div>
+
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={transitOn}
+                onChange={e => setTransitOn(e.target.checked)}
+              />
+              <span className="toggle-label">Transit bonus (2×)</span>
+            </label>
           </div>
-        )}
 
-        <div className="panel-legend">
-          <span className="dot dot-palette" /> Selected
-          &nbsp;&nbsp;
-          <span className="dot dot-unselected" /> Candidate
+          {/* Stats grid */}
+          {results.length > 0 && (
+            <div className="stats-section">
+              <div className="stats-heading">Coverage Stats</div>
+              <div className="stats-grid">
+                <div className="stat-card">
+                  <div className="stat-value">{fmtPop(totalPop)}</div>
+                  <div className="stat-label">Pop covered</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-value">{usPct}%</div>
+                  <div className="stat-label">of US pop</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-value">{fmtPop(avgPop)}</div>
+                  <div className="stat-label">Avg / venue</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-value" style={{ fontSize: 11, color: '#a5b4fc', paddingTop: 2 }}>
+                    {best ? best.name.split('–')[0].trim() : '—'}
+                  </div>
+                  <div className="stat-label">Best pick</div>
+                </div>
+              </div>
+              {worst && worst !== best && (
+                <div style={{ fontSize: 10, color: 'rgba(180,190,220,0.35)', textAlign: 'right', marginTop: -2 }}>
+                  Least efficient: {worst.name} (+{fmtPop(worst.incrementalPopulation)})
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Leaderboard */}
+          {resultsWithCum.length > 0 && (
+            <div className="lb-section">
+              <div className="lb-heading">Ranked Selections</div>
+              <div className="lb-list">
+                {resultsWithCum.map(r => (
+                  <div className="lb-row" key={r.name}>
+                    <div className="lb-accent" style={{ background: r.color }} />
+                    <span className="lb-rank">#{r.rank}</span>
+                    <div className="lb-info">
+                      <span className="lb-name">{r.name}</span>
+                      <div className="lb-meta">
+                        <span className="lb-state">{r.state}</span>
+                        <span className="lb-hexcount">{r.hexCount}⬡</span>
+                      </div>
+                    </div>
+                    <div className="lb-pops">
+                      <span className="lb-incr">+{fmtPop(r.incrementalPopulation)}</span>
+                      <span className="lb-cum">{fmtPop(r.cumulative)} cum</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </>
