@@ -188,7 +188,17 @@ export default function App() {
     const popLookup = popLookupRef.current;
     if (!map || !cands || !popLookup || !mapReadyRef.current) return;
 
-    const tagged   = cands.map(c => ({ ...c, mode: transit ? 'transit' : 'driving' }));
+    // Tag the top-third most population-dense candidates as transit-eligible.
+    // Dense metros (NYC, Chicago, SF, etc.) have high pop-per-hex and real transit;
+    // the 2× bonus only shifts rankings when transit is on.
+    const sorted = cands
+      .map(c => c.population / Math.max(c.hexCount, 1))
+      .sort((a, b) => b - a);
+    const threshold = sorted[Math.floor(sorted.length / 3)];
+    const tagged = cands.map(c => ({
+      ...c,
+      mode: c.population / Math.max(c.hexCount, 1) >= threshold ? 'transit' : 'driving',
+    }));
     const selected = selectOptimalLocations(tagged, popLookup, n, transit ? 2 : 1);
     const colorMap = assignColors(selected, PALETTE);
 
