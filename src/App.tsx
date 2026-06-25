@@ -155,10 +155,6 @@ function emptyFC(): FeatureCollection {
   return { type: 'FeatureCollection', features: [] };
 }
 
-function scenarioKey(transitOn: boolean, mult: number): string {
-  return transitOn ? `on-${mult}` : 'off';
-}
-
 function tooltipHTML(props: DotProps): string {
   if (props.selected) {
     return (
@@ -170,7 +166,7 @@ function tooltipHTML(props: DotProps): string {
   return (
     `<strong>${props.name}</strong><br/>` +
     `${props.state} &nbsp;·&nbsp; ${props.hexCount} hexes<br/>` +
-    `<span style="opacity:.6">15-min pop: ${props.population.toLocaleString()}</span>`
+    `<span style="opacity:.6">Pop: ${props.population.toLocaleString()}</span>`
   );
 }
 
@@ -185,11 +181,10 @@ export default function App() {
   const slimCandidatesRef  = useRef<SlimCandidate[] | null>(null);
   const precomputedRef     = useRef<PrecomputedData | null>(null);
   const mapReadyRef        = useRef(false);
-  const paramsRef          = useRef({ N: 20, transitOn: false, transitMult: 2 });
+  const paramsRef          = useRef({ N: 20, transitOn: false });
 
   const [N, setN]                   = useState(20);
   const [transitOn, setTransitOn]   = useState(false);
-  const [transitMult, setTransitMult] = useState(2);
   const [radius, setRadius]         = useState<Radius>(15);
   const [results, setResults]       = useState<ResultRow[]>([]);
   const [radiusLoading, setRadiusLoading] = useState(false);
@@ -197,12 +192,12 @@ export default function App() {
 
   // Look up the right scenario from precomputed data and push to map
   const runAndUpdate = useCallback((n: number, transit: boolean) => {
-    const map        = mapRef.current;
-    const cands      = slimCandidatesRef.current;
-    const precomp    = precomputedRef.current;
+    const map     = mapRef.current;
+    const cands   = slimCandidatesRef.current;
+    const precomp = precomputedRef.current;
     if (!map || !cands || !precomp || !mapReadyRef.current) return;
 
-    const key      = scenarioKey(transit, paramsRef.current.transitMult);
+    const key      = transit ? 'transit' : 'off';
     const all      = precomp.scenarios[key] ?? [];
     const sliced   = all.slice(0, n);
     const colorMap = assignColors(sliced, PALETTE);
@@ -213,24 +208,15 @@ export default function App() {
     (map.getSource(SOURCE_HEXES) as maplibregl.GeoJSONSource).setData(buildHexGeoJSON(rows, precomp.hexIds));
   }, []);
 
-  // Re-run whenever N, transit toggle, or multiplier changes
-  useEffect(() => {
-    paramsRef.current = { N, transitOn, transitMult };
-    runAndUpdate(N, transitOn);
-  }, [N, transitOn, transitMult, runAndUpdate]);
-
-  // Reload precomputed file when radius changes (skip initial mount)
-  const isFirstRadiusRender = useRef(true);
-  useEffect(() => {
-    if (isFirstRadiusRender.current) { isFirstRadiusRender.current = false; return; }
-    if (!mapReadyRef.current) return;
-
+  // Load the right precomputed file for the given radius + transit combination
+  const loadPrecomputed = useCallback((r: Radius, transit: boolean) => {
     setRadiusLoading(true);
     setRadiusError(null);
     setResults([]);
 
-    fetch(`/precomputed-${radius}.json`)
-      .then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.json() as Promise<PrecomputedData>; })
+    const file = transit ? `/precomputed-union-${r}.json` : `/precomputed-${r}.json`;
+    fetch(file)
+      .then(res => { if (!res.ok) throw new Error(`${res.status}`); return res.json() as Promise<PrecomputedData>; })
       .then(data => {
         precomputedRef.current = data;
         const map = mapRef.current;
@@ -238,9 +224,24 @@ export default function App() {
         const { N: n, transitOn: t } = paramsRef.current;
         runAndUpdate(n, t);
       })
-      .catch(() => setRadiusError(`${radius}-min data unavailable`))
+      .catch(() => setRadiusError(`${r}-min ${transit ? 'transit' : 'driving'} data unavailable`))
       .finally(() => setRadiusLoading(false));
-  }, [radius, runAndUpdate]);
+  }, [runAndUpdate]);
+
+  // Re-run on N change (no file reload needed)
+  useEffect(() => {
+    paramsRef.current = { N, transitOn };
+    runAndUpdate(N, transitOn);
+  }, [N, runAndUpdate]);
+
+  // Reload precomputed file when radius or transit toggle changes (skip initial mount)
+  const isFirstRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRender.current) { isFirstRender.current = false; return; }
+    paramsRef.current = { N, transitOn };
+    if (!mapReadyRef.current) return;
+    loadPrecomputed(radius, transitOn);
+  }, [radius, transitOn, loadPrecomputed]);
 
   // Initialize map once
   useEffect(() => {
@@ -379,20 +380,11 @@ export default function App() {
               <label className="toggle-row">
                 <input type="checkbox" checked={transitOn}
                   onChange={e => setTransitOn(e.target.checked)} />
-                <span className="toggle-label">Transit bonus</span>
+                <span className="toggle-label">Public transit</span>
               </label>
               {transitOn && (
-                <div className="transit-mult">
-                  <div className="transit-mult-row">
-                    <span className="transit-mult-label">Multiplier</span>
-                    <span className="ctrl-value">{transitMult}×</span>
-                  </div>
-                  <input type="range" min={1.5} max={5} step={0.5} value={transitMult}
-                    onChange={e => setTransitMult(Number(e.target.value))} />
-                  <div className="transit-mult-ticks">
-                    <span>1.5×</span><span>2×</span><span>2.5×</span><span>3×</span>
-                    <span>3.5×</span><span>4×</span><span>4.5×</span><span>5×</span>
-                  </div>
+                <div className="transit-note">
+                  Expands coverage using real public transit routes
                 </div>
               )}
             </div>
