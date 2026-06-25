@@ -439,7 +439,7 @@ export default function App() {
               </div>
               <input
                 type="range"
-                min={5} max={50} step={1}
+                min={5} max={100} step={1}
                 value={N}
                 onChange={e => setN(Number(e.target.value))}
               />
