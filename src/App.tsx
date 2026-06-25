@@ -114,7 +114,7 @@ function buildDotGeoJSON(
           selected: sel !== undefined,
           rank: sel?.rank ?? 0,
           incrementalPopulation: sel?.incrementalPopulation ?? 0,
-          color: sel ? (colorMap.get(c.name) ?? PALETTE[0]) : '#3d4f6b',
+          color: sel ? (colorMap.get(c.name) ?? PALETTE[0]) : '#7b90b0',
         } satisfies DotProps,
       };
     }),
@@ -323,11 +323,11 @@ export default function App() {
         source: SOURCE_DOTS,
         filter: ['!=', ['get', 'selected'], true],
         paint: {
-          'circle-radius': 3.5,
-          'circle-color': '#334155',
+          'circle-radius': 4,
+          'circle-color': '#7b90b0',
           'circle-stroke-width': 1,
-          'circle-stroke-color': 'rgba(255,255,255,0.12)',
-          'circle-opacity': 0.6,
+          'circle-stroke-color': 'rgba(255,255,255,0.35)',
+          'circle-opacity': 0.85,
         },
       });
 
