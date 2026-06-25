@@ -359,7 +359,7 @@ export default function App() {
 
             <div className="ctrl-label">
               <div className="ctrl-label-row">
-                <span>Drive time</span>
+                <span>{transitOn ? 'Commute time' : 'Drive time'}</span>
                 {radiusLoading && <span className="ctrl-loading">loading…</span>}
               </div>
               <div className="radius-group">
