@@ -174,10 +174,15 @@ input[type="range"]::-webkit-slider-thumb:hover {
   opacity: 0.35;
 }
 
-.soon-note {
+.ctrl-loading {
   font-size: 10px;
-  color: rgba(180, 190, 220, 0.35);
-  margin-top: 2px;
+  color: #a5b4fc;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
 }
 
 /* Transit toggle */

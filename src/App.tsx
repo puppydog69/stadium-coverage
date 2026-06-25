@@ -152,13 +152,13 @@ function tooltipHTML(props: DotProps): string {
       `<strong>#${props.rank} – ${props.name}</strong><br/>` +
       `${props.state} &nbsp;·&nbsp; ${props.hexCount} hexes<br/>` +
       `<span style="color:#a5b4fc">+${props.incrementalPopulation.toLocaleString()} new</span><br/>` +
-      `<span style="opacity:.6">15-min reach: ${props.population.toLocaleString()}</span>`
+      `<span style="opacity:.6">Isochrone reach: ${props.population.toLocaleString()}</span>`
     );
   }
   return (
     `<strong>${props.name}</strong><br/>` +
     `${props.state} &nbsp;·&nbsp; ${props.hexCount} hexes<br/>` +
-    `<span style="opacity:.6">15-min pop: ${props.population.toLocaleString()}</span>`
+    `<span style="opacity:.6">Isochrone pop: ${props.population.toLocaleString()}</span>`
   );
 }
 
@@ -175,45 +175,75 @@ export default function App() {
   const candidatesRef = useRef<Candidate[] | null>(null);
   const popLookupRef  = useRef<Record<string, number> | null>(null);
   const mapReadyRef   = useRef(false);
-  const paramsRef     = useRef({ N: 20, transitOn: false });
+  const paramsRef     = useRef({ N: 20, transitOn: false, transitMult: 2 as number });
 
   const [N, setN]               = useState(20);
   const [transitOn, setTransitOn] = useState(false);
+  const [transitMult, setTransitMult] = useState<1.5 | 2 | 2.5 | 3>(2);
   const [radius, setRadius]     = useState<Radius>(15);
   const [results, setResults]   = useState<ResultRow[]>([]);
+  const [radiusLoading, setRadiusLoading] = useState(false);
 
-  const runAndUpdate = useCallback((n: number, transit: boolean) => {
-    const map       = mapRef.current;
-    const cands     = candidatesRef.current;
-    const popLookup = popLookupRef.current;
-    if (!map || !cands || !popLookup || !mapReadyRef.current) return;
+  const runAndUpdate = useCallback((n: number, transit: boolean, cands?: Candidate[]) => {
+    const map         = mapRef.current;
+    const activeCands = cands ?? candidatesRef.current;
+    const popLookup   = popLookupRef.current;
+    if (!map || !activeCands || !popLookup || !mapReadyRef.current) return;
 
     // Tag the top-third most population-dense candidates as transit-eligible.
-    // Dense metros (NYC, Chicago, SF, etc.) have high pop-per-hex and real transit;
-    // the 2× bonus only shifts rankings when transit is on.
-    const sorted = cands
-      .map(c => c.population / Math.max(c.hexCount, 1))
-      .sort((a, b) => b - a);
-    const threshold = sorted[Math.floor(sorted.length / 3)];
-    const tagged = cands.map(c => ({
+    // Dense metros have high pop-per-hex; 2× bonus only shifts rankings when on.
+    const densities = activeCands.map(c => c.population / Math.max(c.hexCount, 1));
+    const threshold = [...densities].sort((a, b) => b - a)[Math.floor(densities.length / 3)];
+    const tagged = activeCands.map((c, i) => ({
       ...c,
-      mode: c.population / Math.max(c.hexCount, 1) >= threshold ? 'transit' : 'driving',
+      mode: densities[i] >= threshold ? 'transit' : 'driving',
     }));
-    const selected = selectOptimalLocations(tagged, popLookup, n, transit ? 2 : 1);
-    const colorMap = assignColors(selected, PALETTE);
+
+    const selected = selectOptimalLocations(tagged, popLookup, n, transit ? paramsRef.current.transitMult : 1);
+    const colorMap  = assignColors(selected, PALETTE);
 
     setResults(selected.map(s => ({ ...s, color: colorMap.get(s.name) ?? PALETTE[0] })));
 
     (map.getSource(SOURCE_DOTS) as maplibregl.GeoJSONSource)
-      .setData(buildDotGeoJSON(cands, selected, colorMap));
+      .setData(buildDotGeoJSON(activeCands, selected, colorMap));
     (map.getSource(SOURCE_HEXES) as maplibregl.GeoJSONSource)
       .setData(buildHexGeoJSON(selected, colorMap));
   }, []);
 
   useEffect(() => {
-    paramsRef.current = { N, transitOn };
+    paramsRef.current = { N, transitOn, transitMult };
     runAndUpdate(N, transitOn);
-  }, [N, transitOn, runAndUpdate]);
+  }, [N, transitOn, transitMult, runAndUpdate]);
+
+  // Reload candidates file when radius changes (skip initial mount — map load handles it)
+  const isFirstRadiusRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRadiusRender.current) { isFirstRadiusRender.current = false; return; }
+    if (!mapReadyRef.current) return;
+
+    const file = radius === 15 ? '/candidates.json' : `/candidates-${radius}.json`;
+    setRadiusLoading(true);
+    setResults([]);
+
+    fetch(file)
+      .then(r => {
+        if (!r.ok) throw new Error(`${r.status} loading ${file}`);
+        return r.json() as Promise<Candidate[]>;
+      })
+      .then(newCands => {
+        candidatesRef.current = newCands;
+        const map = mapRef.current;
+        if (map) {
+          (map.getSource(SOURCE_DOTS) as maplibregl.GeoJSONSource)
+            .setData(buildDotGeoJSON(newCands, [], new Map()));
+          (map.getSource(SOURCE_HEXES) as maplibregl.GeoJSONSource)
+            .setData(emptyFC());
+        }
+        runAndUpdate(paramsRef.current.N, paramsRef.current.transitOn, newCands);
+      })
+      .catch(err => console.error('Radius switch failed:', err))
+      .finally(() => setRadiusLoading(false));
+  }, [radius, runAndUpdate]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -414,33 +444,46 @@ export default function App() {
             <div className="ctrl-label">
               <div className="ctrl-label-row">
                 <span>Drive time</span>
+                {radiusLoading && <span className="ctrl-loading">loading…</span>}
               </div>
               <div className="radius-group">
                 {([15, 30, 60] as Radius[]).map(r => (
                   <button
                     key={r}
                     className={`radius-btn${radius === r ? ' active' : ''}`}
-                    disabled={r !== 15}
+                    disabled={radiusLoading}
                     onClick={() => setRadius(r)}
-                    title={r !== 15 ? 'Coming soon' : `${r}-min drive`}
+                    title={`${r}-min drive`}
                   >
                     {r} min
                   </button>
                 ))}
               </div>
-              {radius !== 15 && (
-                <span className="soon-note">30 / 60-min data coming soon</span>
-              )}
             </div>
 
-            <label className="toggle-row">
-              <input
-                type="checkbox"
-                checked={transitOn}
-                onChange={e => setTransitOn(e.target.checked)}
-              />
-              <span className="toggle-label">Transit bonus (2×)</span>
-            </label>
+            <div className="ctrl-label">
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={transitOn}
+                  onChange={e => setTransitOn(e.target.checked)}
+                />
+                <span className="toggle-label">Transit bonus</span>
+              </label>
+              {transitOn && (
+                <div className="radius-group" style={{ marginTop: 6 }}>
+                  {([1.5, 2, 2.5, 3] as const).map(m => (
+                    <button
+                      key={m}
+                      className={`radius-btn${transitMult === m ? ' active' : ''}`}
+                      onClick={() => setTransitMult(m)}
+                    >
+                      {m}×
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Stats grid */}
