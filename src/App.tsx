@@ -175,14 +175,15 @@ export default function App() {
   const candidatesRef = useRef<Candidate[] | null>(null);
   const popLookupRef  = useRef<Record<string, number> | null>(null);
   const mapReadyRef   = useRef(false);
-  const paramsRef     = useRef({ N: 20, transitOn: false, transitMult: 2 as number });
+  const paramsRef     = useRef({ N: 20, transitOn: false, transitMult: 2 });
 
   const [N, setN]               = useState(20);
   const [transitOn, setTransitOn] = useState(false);
-  const [transitMult, setTransitMult] = useState<1.5 | 2 | 2.5 | 3>(2);
+  const [transitMult, setTransitMult] = useState(2);
   const [radius, setRadius]     = useState<Radius>(15);
-  const [results, setResults]   = useState<ResultRow[]>([]);
+  const [results, setResults]     = useState<ResultRow[]>([]);
   const [radiusLoading, setRadiusLoading] = useState(false);
+  const [radiusError, setRadiusError]     = useState<string | null>(null);
 
   const runAndUpdate = useCallback((n: number, transit: boolean, cands?: Candidate[]) => {
     const map         = mapRef.current;
@@ -221,17 +222,20 @@ export default function App() {
     if (isFirstRadiusRender.current) { isFirstRadiusRender.current = false; return; }
     if (!mapReadyRef.current) return;
 
-    const file = radius === 15 ? '/candidates.json' : `/candidates-${radius}.json`;
+    const suffix    = radius === 15 ? '' : `-${radius}`;
+    const candFile  = radius === 15 ? '/candidates.json' : `/candidates-${radius}.json`;
+    const popFile   = radius === 15 ? '/hex-pop.json'    : `/hex-pop${suffix}.json`;
     setRadiusLoading(true);
+    setRadiusError(null);
     setResults([]);
 
-    fetch(file)
-      .then(r => {
-        if (!r.ok) throw new Error(`${r.status} loading ${file}`);
-        return r.json() as Promise<Candidate[]>;
-      })
-      .then(newCands => {
+    Promise.all([
+      fetch(candFile).then(r => { if (!r.ok) throw new Error(`${r.status} ${candFile}`); return r.json() as Promise<Candidate[]>; }),
+      fetch(popFile).then(r  => { if (!r.ok) throw new Error(`${r.status} ${popFile}`);  return r.json() as Promise<Record<string, number>>; }),
+    ])
+      .then(([newCands, newPop]) => {
         candidatesRef.current = newCands;
+        popLookupRef.current  = newPop;
         const map = mapRef.current;
         if (map) {
           (map.getSource(SOURCE_DOTS) as maplibregl.GeoJSONSource)
@@ -241,7 +245,7 @@ export default function App() {
         }
         runAndUpdate(paramsRef.current.N, paramsRef.current.transitOn, newCands);
       })
-      .catch(err => console.error('Radius switch failed:', err))
+      .catch(err => { console.error('Radius switch failed:', err); setRadiusError(`Data for ${radius}-min not yet available`); })
       .finally(() => setRadiusLoading(false));
   }, [radius, runAndUpdate]);
 
@@ -459,6 +463,7 @@ export default function App() {
                   </button>
                 ))}
               </div>
+              {radiusError && <span className="soon-note" style={{ color: '#f87171' }}>{radiusError}</span>}
             </div>
 
             <div className="ctrl-label">
@@ -471,16 +476,21 @@ export default function App() {
                 <span className="toggle-label">Transit bonus</span>
               </label>
               {transitOn && (
-                <div className="radius-group" style={{ marginTop: 6 }}>
-                  {([1.5, 2, 2.5, 3] as const).map(m => (
-                    <button
-                      key={m}
-                      className={`radius-btn${transitMult === m ? ' active' : ''}`}
-                      onClick={() => setTransitMult(m)}
-                    >
-                      {m}×
-                    </button>
-                  ))}
+                <div className="transit-mult">
+                  <div className="transit-mult-row">
+                    <span className="transit-mult-label">Multiplier</span>
+                    <span className="ctrl-value">{transitMult}×</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1.5} max={5} step={0.5}
+                    value={transitMult}
+                    onChange={e => setTransitMult(Number(e.target.value))}
+                  />
+                  <div className="transit-mult-ticks">
+                    <span>1.5×</span><span>2×</span><span>2.5×</span><span>3×</span>
+                    <span>3.5×</span><span>4×</span><span>4.5×</span><span>5×</span>
+                  </div>
                 </div>
               )}
             </div>
