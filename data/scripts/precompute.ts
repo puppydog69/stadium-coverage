@@ -31,7 +31,7 @@ function save(filePath: string, data: unknown) {
   console.log(`  → ${filePath} (${Number(kb) >= 1024 ? (Number(kb)/1024).toFixed(1)+'MB' : kb+'KB'})`);
 }
 
-async function processDrivingRadius(radius: 15 | 30 | 60) {
+async function processDrivingRadius(radius: 15 | 30 | 60 | 90 | 120 | 150) {
   const candFile = radius === 15 ? 'public/candidates.json' : `data/candidates-${radius}.json`;
   const popFile  = radius === 15 ? 'data/hex-pop.json'      : `data/hex-pop-${radius}.json`;
 
@@ -56,7 +56,7 @@ async function processDrivingRadius(radius: 15 | 30 | 60) {
   save(`public/precomputed-drive-${radius}-hexids.json`, { hexIds });
 }
 
-async function processUnionRadius(radius: 15 | 30 | 60) {
+async function processUnionRadius(radius: 15 | 30 | 60 | 90 | 120 | 150) {
   const unionFile = `data/candidates-union-${radius}.json`;
   if (!existsSync(unionFile)) throw new Error(`Missing ${unionFile}`);
 
@@ -89,7 +89,7 @@ async function main() {
   );
   save('public/candidates-slim.json', slim);
 
-  for (const radius of [15, 30, 60] as const) {
+  for (const radius of [15, 30, 60, 90, 120, 150] as const) {
     await processDrivingRadius(radius);
     await processUnionRadius(radius);
   }

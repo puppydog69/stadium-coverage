@@ -17,6 +17,8 @@ const LAYER_HEX_STROKE  = 'hex-stroke';
 const LAYER_SEL_GLOW    = 'selected-glow';
 const LAYER_UNSELECTED  = 'unselected-circle';
 const LAYER_SELECTED    = 'selected-circle';
+const SOURCE_RAIL       = 'rail-overlay';
+const LAYER_RAIL        = 'rail-lines';
 
 const US_POPULATION = 335_000_000;
 
@@ -66,7 +68,7 @@ interface DotProps {
 
 type ResultRow = ScenarioEntry & { rank: number; color: string; };
 
-type Radius = 15 | 30 | 60;
+type Radius = 15 | 30 | 60 | 90 | 120 | 150;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -197,7 +199,7 @@ export default function App() {
 
   const [N, setN]                 = useState(20);
   const [transitOn, setTransitOn] = useState(false);
-  const [radius, setRadius]       = useState<Radius>(15);
+  const [radius, setRadius]       = useState<Radius>(30);
   const [results, setResults]     = useState<ResultRow[]>([]);
   const [loading, setLoading]     = useState(false);
   const [hexLoading, setHexLoading] = useState(false);
@@ -286,6 +288,13 @@ export default function App() {
     if (rows && !hexLoading) pushHexes(rows);
   }, [N, updateLeaderboard, pushHexes, transitOn, hexLoading]);
 
+  // Toggle rail overlay visibility with transit
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReadyRef.current) return;
+    map.setLayoutProperty(LAYER_RAIL, 'visibility', transitOn ? 'visible' : 'none');
+  }, [transitOn]);
+
   // Radius or transit toggle — reload files
   const isFirstRender = useRef(true);
   useEffect(() => {
@@ -312,13 +321,28 @@ export default function App() {
       // Load both in parallel — scenarios is tiny so it resolves first
       const [slimRes, scenRes] = await Promise.all([
         fetch('/candidates-slim.json'),
-        fetch('/precomputed-drive-15.json'),
+        fetch('/precomputed-drive-30.json'),
       ]);
       const slim: SlimCandidate[]  = await slimRes.json();
       const scenData: ScenariosFile = await scenRes.json();
 
       slimCandidatesRef.current = slim;
       scenariosRef.current      = scenData.scenarios;
+
+      // Rail overlay (OpenRailwayMap) — shown when transit is on
+      map.addSource(SOURCE_RAIL, {
+        type: 'raster',
+        tiles: ['https://tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png'],
+        tileSize: 256,
+        attribution: '© OpenRailwayMap contributors',
+      });
+      map.addLayer({
+        id: LAYER_RAIL,
+        type: 'raster',
+        source: SOURCE_RAIL,
+        layout: { visibility: 'none' },
+        paint: { 'raster-opacity': 0.55 },
+      });
 
       map.addSource(SOURCE_HEXES, { type: 'geojson', data: emptyFC() });
       map.addLayer({ id: LAYER_HEX_FILL, type: 'fill', source: SOURCE_HEXES,
@@ -366,7 +390,7 @@ export default function App() {
       });
 
       mapReadyRef.current = true;
-      hexIdsKeyRef.current = 'drive-15';
+      hexIdsKeyRef.current = 'drive-30';
 
       // Show leaderboard immediately from scenarios
       const { N: n, transitOn: t } = paramsRef.current;
@@ -374,10 +398,10 @@ export default function App() {
 
       // Load hexids in background
       setHexLoading(true);
-      fetch('/precomputed-drive-15-hexids.json')
+      fetch('/precomputed-drive-30-hexids.json')
         .then(r => r.json() as Promise<HexIdsFile>)
         .then(hdata => {
-          if (hexIdsKeyRef.current !== 'drive-15') return;
+          if (hexIdsKeyRef.current !== 'drive-30') return;
           hexIdsRef.current = hdata.hexIds;
           setHexLoading(false);
           if (rows) pushHexes(rows);
@@ -423,7 +447,7 @@ export default function App() {
                 <span>Venues</span>
                 <span className="ctrl-value">{N}</span>
               </div>
-              <input type="range" min={5} max={100} step={1} value={N}
+              <input type="range" min={5} max={50} step={1} value={N}
                 onChange={e => setN(Number(e.target.value))} />
             </div>
 
@@ -434,7 +458,7 @@ export default function App() {
                 {!loading && hexLoading && <span className="ctrl-loading">loading map…</span>}
               </div>
               <div className="radius-group">
-                {([15, 30, 60] as Radius[]).map(r => (
+                {([30, 60, 90, 120, 150] as Radius[]).map(r => (
                   <button key={r}
                     className={`radius-btn${radius === r ? ' active' : ''}`}
                     disabled={loading}

@@ -35,10 +35,11 @@ interface TTResponse {
   results: TTResult[];
 }
 
-export async function getTransitIsochroneHexes(
+async function getTravelTimeHexes(
   lat: number,
   lon: number,
   minutes: number,
+  mode: "public_transport" | "driving",
 ): Promise<string[]> {
   const appId  = process.env.TRAVELTIME_APP_ID;
   const apiKey = process.env.TRAVELTIME_API_KEY;
@@ -57,7 +58,7 @@ export async function getTransitIsochroneHexes(
         coords: { lat, lng: lon },
         departure_time: DEPARTURE_TIME,
         travel_time: minutes * 60,
-        transportation: { type: "public_transport" },
+        transportation: { type: mode },
       }],
     }),
   });
@@ -90,4 +91,12 @@ export async function getTransitIsochroneHexes(
   }
 
   return [...hexSet];
+}
+
+export async function getTransitIsochroneHexes(lat: number, lon: number, minutes: number): Promise<string[]> {
+  return getTravelTimeHexes(lat, lon, minutes, "public_transport");
+}
+
+export async function getDrivingIsochroneHexesTT(lat: number, lon: number, minutes: number): Promise<string[]> {
+  return getTravelTimeHexes(lat, lon, minutes, "driving");
 }
