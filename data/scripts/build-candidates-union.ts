@@ -30,7 +30,7 @@ interface Candidate {
 }
 
 function outPath(minutes: number) {
-  return path.resolve(process.cwd(), `public/candidates-union-${minutes}.json`);
+  return path.resolve(process.cwd(), `data/candidates-union-${minutes}.json`);
 }
 
 function save(results: Candidate[], minutes: number) {
@@ -133,7 +133,7 @@ async function main() {
   for (const minutes of [15, 30, 60] as const) {
     const srcFile = minutes === 15
       ? "public/candidates.json"
-      : `public/candidates-${minutes}.json`;
+      : `data/candidates-${minutes}.json`;
     const sources: Candidate[] = JSON.parse(fs.readFileSync(srcFile, "utf8"));
     await buildUnion(sources, popLookup, minutes);
   }

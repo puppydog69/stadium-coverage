@@ -1,15 +1,8 @@
 /**
  * Pre-compute optimizer results for all radius × transit scenarios.
- * Run once at build time; outputs are served as static JSON to the browser.
- *
- * Outputs:
- *   public/candidates-slim.json         — 326 candidates without hexIds (for dot markers)
- *   public/precomputed-15.json          — driving-only optimizer for 15-min radius
- *   public/precomputed-30.json          — driving-only optimizer for 30-min radius
- *   public/precomputed-60.json          — driving-only optimizer for 60-min radius
- *   public/precomputed-union-15.json    — driving+transit union for 15-min radius
- *   public/precomputed-union-30.json    — driving+transit union for 30-min radius
- *   public/precomputed-union-60.json    — driving+transit union for 60-min radius
+ * Outputs two files per combination to keep browser loads small:
+ *   - precomputed-{mode}-{r}.json      → scenarios only (<150KB) — loads first, instant UI
+ *   - precomputed-{mode}-{r}-hexids.json → hexIds only (big) — loads in background for map
  *
  * Usage:
  *   node --experimental-strip-types data/scripts/precompute.ts
@@ -31,95 +24,74 @@ interface ScenarioEntry {
   hexCount: number; incrementalPopulation: number;
 }
 
-interface PrecomputedFile {
-  hexIds: Record<string, string[]>;
-  scenarios: Record<string, ScenarioEntry[]>;
+function save(filePath: string, data: unknown) {
+  const json = JSON.stringify(data);
+  writeFileSync(filePath, json);
+  const kb = (json.length / 1024).toFixed(0);
+  console.log(`  → ${filePath} (${Number(kb) >= 1024 ? (Number(kb)/1024).toFixed(1)+'MB' : kb+'KB'})`);
 }
 
-async function processDrivingRadius(radius: 15 | 30 | 60): Promise<PrecomputedFile> {
-  const candFile = radius === 15 ? 'public/candidates.json' : `public/candidates-${radius}.json`;
-  const popFile  = radius === 15 ? 'public/hex-pop.json'    : `public/hex-pop-${radius}.json`;
+async function processDrivingRadius(radius: 15 | 30 | 60) {
+  const candFile = radius === 15 ? 'public/candidates.json' : `data/candidates-${radius}.json`;
+  const popFile  = radius === 15 ? 'data/hex-pop.json'      : `data/hex-pop-${radius}.json`;
 
-  console.log(`\n[driving-${radius}min] Loading candidates...`);
+  console.log(`\n[drive-${radius}min] Loading...`);
   const candidates: Candidate[] = JSON.parse(readFileSync(candFile, 'utf8'));
   const popLookup: Record<string, number> = JSON.parse(readFileSync(popFile, 'utf8'));
-  console.log(`[driving-${radius}min] ${candidates.length} candidates, ${Object.keys(popLookup).length.toLocaleString()} hex entries.`);
+  process.stdout.write(`[drive-${radius}min] Computing...`);
 
-  process.stdout.write(`[driving-${radius}min] Computing 'off'...`);
   const selected = selectOptimalLocations(candidates, popLookup, N_MAX, 1);
 
+  const scenarios: Record<string, ScenarioEntry[]> = {
+    off: selected.map(s => ({
+      name: s.name, state: s.state, lat: s.lat, lon: s.lon,
+      hexCount: s.hexCount, incrementalPopulation: s.incrementalPopulation,
+    })),
+  };
   const hexIds: Record<string, string[]> = {};
-  const scenarios: Record<string, ScenarioEntry[]> = {};
-
-  scenarios['off'] = selected.map(s => ({
-    name: s.name, state: s.state, lat: s.lat, lon: s.lon,
-    hexCount: s.hexCount, incrementalPopulation: s.incrementalPopulation,
-  }));
-  for (const s of selected) {
-    if (!hexIds[s.name]) hexIds[s.name] = s.hexIds;
-  }
+  for (const s of selected) hexIds[s.name] = s.hexIds;
 
   console.log(` done (${selected.length} selected)`);
-  return { hexIds, scenarios };
+  save(`public/precomputed-drive-${radius}.json`, { scenarios });
+  save(`public/precomputed-drive-${radius}-hexids.json`, { hexIds });
 }
 
-async function processUnionRadius(radius: 15 | 30 | 60): Promise<PrecomputedFile> {
-  const unionFile = `public/candidates-union-${radius}.json`;
-  if (!existsSync(unionFile)) {
-    throw new Error(`Missing ${unionFile} — run build-candidates-union.ts first`);
-  }
+async function processUnionRadius(radius: 15 | 30 | 60) {
+  const unionFile = `data/candidates-union-${radius}.json`;
+  if (!existsSync(unionFile)) throw new Error(`Missing ${unionFile}`);
 
-  // Union candidates were built with full population-r8.json — use it here too
-  console.log(`\n[union-${radius}min] Loading union candidates...`);
+  console.log(`\n[transit-${radius}min] Loading...`);
   const candidates: Candidate[] = JSON.parse(readFileSync(unionFile, 'utf8'));
-  console.log(`[union-${radius}min] Loading population lookup...`);
   const popLookup: Record<string, number> = JSON.parse(readFileSync('data/population-r8.json', 'utf8'));
-  console.log(`[union-${radius}min] ${candidates.length} candidates, ${Object.keys(popLookup).length.toLocaleString()} hex entries.`);
+  process.stdout.write(`[transit-${radius}min] Computing...`);
 
-  process.stdout.write(`[union-${radius}min] Computing 'transit'...`);
   const selected = selectOptimalLocations(candidates, popLookup, N_MAX, 1);
 
+  const scenarios: Record<string, ScenarioEntry[]> = {
+    transit: selected.map(s => ({
+      name: s.name, state: s.state, lat: s.lat, lon: s.lon,
+      hexCount: s.hexCount, incrementalPopulation: s.incrementalPopulation,
+    })),
+  };
   const hexIds: Record<string, string[]> = {};
-  const scenarios: Record<string, ScenarioEntry[]> = {};
-
-  scenarios['transit'] = selected.map(s => ({
-    name: s.name, state: s.state, lat: s.lat, lon: s.lon,
-    hexCount: s.hexCount, incrementalPopulation: s.incrementalPopulation,
-  }));
-  for (const s of selected) {
-    if (!hexIds[s.name]) hexIds[s.name] = s.hexIds;
-  }
+  for (const s of selected) hexIds[s.name] = s.hexIds;
 
   console.log(` done (${selected.length} selected)`);
-  return { hexIds, scenarios };
+  save(`public/precomputed-transit-${radius}.json`, { scenarios });
+  save(`public/precomputed-transit-${radius}-hexids.json`, { hexIds });
 }
 
 async function main() {
-  // Build slim candidates file (no hexIds — just for dot markers)
   console.log('Building candidates-slim.json...');
   const base: Candidate[] = JSON.parse(readFileSync('public/candidates.json', 'utf8'));
   const slim: SlimCandidate[] = base.map(({ name, state, lat, lon, hexCount, population }) =>
     ({ name, state, lat, lon, hexCount, population })
   );
-  writeFileSync('public/candidates-slim.json', JSON.stringify(slim));
-  console.log(`candidates-slim.json: ${slim.length} candidates, ${(JSON.stringify(slim).length / 1024).toFixed(0)} KB`);
+  save('public/candidates-slim.json', slim);
 
-  // Driving-only precomputed files
   for (const radius of [15, 30, 60] as const) {
-    const data = await processDrivingRadius(radius);
-    const json = JSON.stringify(data);
-    writeFileSync(`public/precomputed-${radius}.json`, json);
-    const mb = (json.length / 1_048_576).toFixed(1);
-    console.log(`\n[driving-${radius}min] Saved precomputed-${radius}.json (${mb} MB)`);
-  }
-
-  // Union (driving+transit) precomputed files
-  for (const radius of [15, 30, 60] as const) {
-    const data = await processUnionRadius(radius);
-    const json = JSON.stringify(data);
-    writeFileSync(`public/precomputed-union-${radius}.json`, json);
-    const mb = (json.length / 1_048_576).toFixed(1);
-    console.log(`\n[union-${radius}min] Saved precomputed-union-${radius}.json (${mb} MB)`);
+    await processDrivingRadius(radius);
+    await processUnionRadius(radius);
   }
 
   console.log('\nAll done.');

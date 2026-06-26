@@ -51,9 +51,12 @@ interface ScenarioEntry {
   hexCount: number; incrementalPopulation: number;
 }
 
-interface PrecomputedData {
-  hexIds: Record<string, string[]>;
+interface ScenariosFile {
   scenarios: Record<string, ScenarioEntry[]>;
+}
+
+interface HexIdsFile {
+  hexIds: Record<string, string[]>;
 }
 
 interface DotProps {
@@ -155,6 +158,10 @@ function emptyFC(): FeatureCollection {
   return { type: 'FeatureCollection', features: [] };
 }
 
+function modePrefix(transitOn: boolean): string {
+  return transitOn ? 'transit' : 'drive';
+}
+
 function tooltipHTML(props: DotProps): string {
   if (props.selected) {
     return (
@@ -175,73 +182,118 @@ function tooltipHTML(props: DotProps): string {
 // ---------------------------------------------------------------------------
 
 export default function App() {
-  const containerRef       = useRef<HTMLDivElement>(null);
-  const mapRef             = useRef<maplibregl.Map | null>(null);
-  const popupRef           = useRef<maplibregl.Popup | null>(null);
-  const slimCandidatesRef  = useRef<SlimCandidate[] | null>(null);
-  const precomputedRef     = useRef<PrecomputedData | null>(null);
-  const mapReadyRef        = useRef(false);
-  const paramsRef          = useRef({ N: 20, transitOn: false });
+  const containerRef      = useRef<HTMLDivElement>(null);
+  const mapRef            = useRef<maplibregl.Map | null>(null);
+  const popupRef          = useRef<maplibregl.Popup | null>(null);
+  const slimCandidatesRef = useRef<SlimCandidate[] | null>(null);
+  // scenarios: loaded first (tiny file), drives leaderboard
+  const scenariosRef      = useRef<Record<string, ScenarioEntry[]> | null>(null);
+  // hexIds: loaded after scenarios (big file), drives map hexes
+  const hexIdsRef         = useRef<Record<string, string[]>>({});
+  const mapReadyRef       = useRef(false);
+  const paramsRef         = useRef({ N: 20, transitOn: false });
+  // Track which hexids file is currently loaded so we don't re-render stale hexes
+  const hexIdsKeyRef      = useRef('');
 
-  const [N, setN]                   = useState(20);
-  const [transitOn, setTransitOn]   = useState(false);
-  const [radius, setRadius]         = useState<Radius>(15);
-  const [results, setResults]       = useState<ResultRow[]>([]);
-  const [radiusLoading, setRadiusLoading] = useState(false);
-  const [radiusError, setRadiusError]     = useState<string | null>(null);
+  const [N, setN]                 = useState(20);
+  const [transitOn, setTransitOn] = useState(false);
+  const [radius, setRadius]       = useState<Radius>(15);
+  const [results, setResults]     = useState<ResultRow[]>([]);
+  const [loading, setLoading]     = useState(false);
+  const [hexLoading, setHexLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Look up the right scenario from precomputed data and push to map
-  const runAndUpdate = useCallback((n: number, transit: boolean) => {
-    const map     = mapRef.current;
-    const cands   = slimCandidatesRef.current;
-    const precomp = precomputedRef.current;
-    if (!map || !cands || !precomp || !mapReadyRef.current) return;
-
-    const key      = transit ? 'transit' : 'off';
-    const all      = precomp.scenarios[key] ?? [];
-    const sliced   = all.slice(0, n);
-    const colorMap = assignColors(sliced, PALETTE);
-    const rows     = sliced.map((s, i) => ({ ...s, rank: i + 1, color: colorMap.get(s.name) ?? PALETTE[0] }));
-
-    setResults(rows);
+  // Push current results to the map dots layer
+  const pushDots = useCallback((rows: ResultRow[]) => {
+    const map   = mapRef.current;
+    const cands = slimCandidatesRef.current;
+    if (!map || !cands || !mapReadyRef.current) return;
     (map.getSource(SOURCE_DOTS) as maplibregl.GeoJSONSource).setData(buildDotGeoJSON(cands, rows));
-    (map.getSource(SOURCE_HEXES) as maplibregl.GeoJSONSource).setData(buildHexGeoJSON(rows, precomp.hexIds));
   }, []);
 
-  // Load the right precomputed file for the given radius + transit combination
-  const loadPrecomputed = useCallback((r: Radius, transit: boolean) => {
-    setRadiusLoading(true);
-    setRadiusError(null);
+  // Push hex polygons to the map (only when hexIds are available)
+  const pushHexes = useCallback((rows: ResultRow[]) => {
+    const map = mapRef.current;
+    if (!map || !mapReadyRef.current) return;
+    (map.getSource(SOURCE_HEXES) as maplibregl.GeoJSONSource).setData(
+      buildHexGeoJSON(rows, hexIdsRef.current)
+    );
+  }, []);
+
+  // Slice scenarios and update leaderboard + dots (instant — no hex rendering)
+  const updateLeaderboard = useCallback((n: number, transit: boolean) => {
+    const scenarios = scenariosRef.current;
+    if (!scenarios) return;
+    const key    = transit ? 'transit' : 'off';
+    const all    = scenarios[key] ?? [];
+    const sliced = all.slice(0, n);
+    const colorMap = assignColors(sliced, PALETTE);
+    const rows = sliced.map((s, i) => ({ ...s, rank: i + 1, color: colorMap.get(s.name) ?? PALETTE[0] }));
+    setResults(rows);
+    pushDots(rows);
+    return rows;
+  }, [pushDots]);
+
+  // Load a new mode+radius combination: scenarios first, then hexids in background
+  const loadMode = useCallback((r: Radius, transit: boolean) => {
+    const prefix = modePrefix(transit);
+    const key    = `${prefix}-${r}`;
+
+    setLoading(true);
+    setHexLoading(true);
+    setLoadError(null);
     setResults([]);
+    hexIdsRef.current  = {};
+    hexIdsKeyRef.current = key;
 
-    const file = transit ? `/precomputed-union-${r}.json` : `/precomputed-${r}.json`;
-    fetch(file)
-      .then(res => { if (!res.ok) throw new Error(`${res.status}`); return res.json() as Promise<PrecomputedData>; })
+    const map = mapRef.current;
+    if (map && mapReadyRef.current) {
+      (map.getSource(SOURCE_HEXES) as maplibregl.GeoJSONSource).setData(emptyFC());
+    }
+
+    // 1. Fetch scenarios (tiny — instant leaderboard)
+    fetch(`/precomputed-${key}.json`)
+      .then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.json() as Promise<ScenariosFile>; })
       .then(data => {
-        precomputedRef.current = data;
-        const map = mapRef.current;
-        if (map) (map.getSource(SOURCE_HEXES) as maplibregl.GeoJSONSource).setData(emptyFC());
+        scenariosRef.current = data.scenarios;
+        setLoading(false);
         const { N: n, transitOn: t } = paramsRef.current;
-        runAndUpdate(n, t);
-      })
-      .catch(() => setRadiusError(`${r}-min ${transit ? 'transit' : 'driving'} data unavailable`))
-      .finally(() => setRadiusLoading(false));
-  }, [runAndUpdate]);
+        const rows = updateLeaderboard(n, t);
 
-  // Re-run on N change (no file reload needed)
+        // 2. Fetch hexids in background (big file — map updates when ready)
+        return fetch(`/precomputed-${key}-hexids.json`)
+          .then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.json() as Promise<HexIdsFile>; })
+          .then(hdata => {
+            // Only apply if the user hasn't switched to a different mode/radius while loading
+            if (hexIdsKeyRef.current !== key) return;
+            hexIdsRef.current = hdata.hexIds;
+            setHexLoading(false);
+            if (rows) pushHexes(rows);
+          });
+      })
+      .catch(err => {
+        setLoading(false);
+        setHexLoading(false);
+        setLoadError(`${r}-min data unavailable`);
+        console.error(err);
+      });
+  }, [updateLeaderboard, pushHexes]);
+
+  // N slider change — update leaderboard+dots instantly, update hexes if already loaded
   useEffect(() => {
     paramsRef.current = { N, transitOn };
-    runAndUpdate(N, transitOn);
-  }, [N, runAndUpdate]);
+    const rows = updateLeaderboard(N, transitOn);
+    if (rows && !hexLoading) pushHexes(rows);
+  }, [N, updateLeaderboard, pushHexes, transitOn, hexLoading]);
 
-  // Reload precomputed file when radius or transit toggle changes (skip initial mount)
+  // Radius or transit toggle — reload files
   const isFirstRender = useRef(true);
   useEffect(() => {
     if (isFirstRender.current) { isFirstRender.current = false; return; }
     paramsRef.current = { N, transitOn };
     if (!mapReadyRef.current) return;
-    loadPrecomputed(radius, transitOn);
-  }, [radius, transitOn, loadPrecomputed]);
+    loadMode(radius, transitOn);
+  }, [radius, transitOn, loadMode]);
 
   // Initialize map once
   useEffect(() => {
@@ -257,14 +309,16 @@ export default function App() {
     map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
 
     map.on('load', async () => {
-      const [slimRes, preRes] = await Promise.all([
+      // Load both in parallel — scenarios is tiny so it resolves first
+      const [slimRes, scenRes] = await Promise.all([
         fetch('/candidates-slim.json'),
-        fetch('/precomputed-15.json'),
+        fetch('/precomputed-drive-15.json'),
       ]);
-      const slim: SlimCandidate[]    = await slimRes.json();
-      const precomp: PrecomputedData = await preRes.json();
-      slimCandidatesRef.current  = slim;
-      precomputedRef.current     = precomp;
+      const slim: SlimCandidate[]  = await slimRes.json();
+      const scenData: ScenariosFile = await scenRes.json();
+
+      slimCandidatesRef.current = slim;
+      scenariosRef.current      = scenData.scenarios;
 
       map.addSource(SOURCE_HEXES, { type: 'geojson', data: emptyFC() });
       map.addLayer({ id: LAYER_HEX_FILL, type: 'fill', source: SOURCE_HEXES,
@@ -312,8 +366,23 @@ export default function App() {
       });
 
       mapReadyRef.current = true;
+      hexIdsKeyRef.current = 'drive-15';
+
+      // Show leaderboard immediately from scenarios
       const { N: n, transitOn: t } = paramsRef.current;
-      runAndUpdate(n, t);
+      const rows = updateLeaderboard(n, t);
+
+      // Load hexids in background
+      setHexLoading(true);
+      fetch('/precomputed-drive-15-hexids.json')
+        .then(r => r.json() as Promise<HexIdsFile>)
+        .then(hdata => {
+          if (hexIdsKeyRef.current !== 'drive-15') return;
+          hexIdsRef.current = hdata.hexIds;
+          setHexLoading(false);
+          if (rows) pushHexes(rows);
+        })
+        .catch(() => setHexLoading(false));
     });
 
     return () => {
@@ -322,7 +391,7 @@ export default function App() {
       mapRef.current      = null;
       mapReadyRef.current = false;
     };
-  }, [runAndUpdate]);
+  }, [updateLeaderboard, pushHexes]);
 
   // Derived stats
   const totalPop = results.reduce((s, r) => s + r.incrementalPopulation, 0);
@@ -361,19 +430,20 @@ export default function App() {
             <div className="ctrl-label">
               <div className="ctrl-label-row">
                 <span>{transitOn ? 'Commute time' : 'Drive time'}</span>
-                {radiusLoading && <span className="ctrl-loading">loading…</span>}
+                {loading && <span className="ctrl-loading">loading…</span>}
+                {!loading && hexLoading && <span className="ctrl-loading">loading map…</span>}
               </div>
               <div className="radius-group">
                 {([15, 30, 60] as Radius[]).map(r => (
                   <button key={r}
                     className={`radius-btn${radius === r ? ' active' : ''}`}
-                    disabled={radiusLoading}
+                    disabled={loading}
                     onClick={() => setRadius(r)}>
                     {r} min
                   </button>
                 ))}
               </div>
-              {radiusError && <span className="soon-note" style={{ color: '#f87171' }}>{radiusError}</span>}
+              {loadError && <span className="soon-note" style={{ color: '#f87171' }}>{loadError}</span>}
             </div>
 
             <div className="ctrl-label">
