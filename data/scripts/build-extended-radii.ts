@@ -29,6 +29,19 @@ async function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 function drivingPath(min: number) { return `data/candidates-${min}.json`; }
 function unionPath(min: number)   { return `data/candidates-union-${min}.json`; }
 
+// Stream-write a large array to avoid V8's JSON.stringify string limit (~1GB)
+function saveStreamJson(filePath: string, items: Candidate[]) {
+  const sorted = [...items].sort((a, b) => b.population - a.population);
+  const stream = fs.createWriteStream(filePath);
+  stream.write('[');
+  for (let i = 0; i < sorted.length; i++) {
+    if (i > 0) stream.write(',');
+    stream.write(JSON.stringify(sorted[i]));
+  }
+  stream.write(']');
+  stream.end();
+}
+
 async function buildDriving(minutes: number, popLookup: Record<string, number>) {
   const out = drivingPath(minutes);
   const sources: Candidate[] = JSON.parse(fs.readFileSync("public/candidates.json", "utf8"));
@@ -62,12 +75,12 @@ async function buildDriving(minutes: number, popLookup: Record<string, number>) 
       console.log(`[drive-${minutes}min] [${completed.size}/${sources.length} ${pct}%] ${name.padEnd(42)} ${r.hexCount} hexes`);
     }
     if ((i + 1) % SAVE_EVERY === 0) {
-      fs.writeFileSync(out, JSON.stringify([...completed.values()].sort((a, b) => b.population - a.population)));
+      saveStreamJson(out, [...completed.values()]);
     }
     if (i < todo.length - 1) await sleep(DELAY_MS);
   }
 
-  fs.writeFileSync(out, JSON.stringify([...completed.values()].sort((a, b) => b.population - a.population)));
+  saveStreamJson(out, [...completed.values()]);
   console.log(`[drive-${minutes}min] Done → ${out}\n`);
 }
 
@@ -109,12 +122,12 @@ async function buildUnion(minutes: number, popLookup: Record<string, number>) {
       console.log(`[union-${minutes}min] [${completed.size}/${sources.length} ${pct}%] ${src.name.padEnd(42)} drive:${drivingHexes.size}+transit:${transitHexes.length}→${r.hexCount}`);
     }
     if ((i + 1) % SAVE_EVERY === 0) {
-      fs.writeFileSync(out, JSON.stringify([...completed.values()].sort((a, b) => b.population - a.population)));
+      saveStreamJson(out, [...completed.values()]);
     }
     if (i < todo.length - 1) await sleep(DELAY_MS);
   }
 
-  fs.writeFileSync(out, JSON.stringify([...completed.values()].sort((a, b) => b.population - a.population)));
+  saveStreamJson(out, [...completed.values()]);
   const mb = (fs.statSync(out).size / 1_048_576).toFixed(1);
   console.log(`[union-${minutes}min] Done → ${out} (${mb} MB)\n`);
 }

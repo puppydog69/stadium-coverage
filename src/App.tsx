@@ -55,6 +55,7 @@ interface ScenarioEntry {
 
 interface ScenariosFile {
   scenarios: Record<string, ScenarioEntry[]>;
+  hexidChunks?: number;
 }
 
 interface HexIdsFile {
@@ -68,7 +69,7 @@ interface DotProps {
 
 type ResultRow = ScenarioEntry & { rank: number; color: string; };
 
-type Radius = 15 | 30 | 60 | 90;
+type Radius = 15 | 30 | 45 | 60 | 90 | 120;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -199,7 +200,7 @@ export default function App() {
 
   const [N, setN]                 = useState(20);
   const [transitOn, setTransitOn] = useState(false);
-  const [radius, setRadius]       = useState<Radius>(30);
+  const [radius, setRadius]       = useState<Radius>(60);
   const [results, setResults]     = useState<ResultRow[]>([]);
   const [loading, setLoading]     = useState(false);
   const [hexLoading, setHexLoading] = useState(false);
@@ -262,13 +263,19 @@ export default function App() {
         const { N: n, transitOn: t } = paramsRef.current;
         const rows = updateLeaderboard(n, t);
 
-        // 2. Fetch hexids in background (big file — map updates when ready)
-        return fetch(`/precomputed-${key}-hexids.json`)
-          .then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.json() as Promise<HexIdsFile>; })
-          .then(hdata => {
-            // Only apply if the user hasn't switched to a different mode/radius while loading
+        // 2. Fetch hexids in background (may be chunked for large radii)
+        const chunks = data.hexidChunks ?? 1;
+        const hexFetches = chunks === 1
+          ? [fetch(`/precomputed-${key}-hexids.json`).then(r => r.json() as Promise<HexIdsFile>)]
+          : Array.from({ length: chunks }, (_, i) =>
+              fetch(`/precomputed-${key}-hexids-${i}.json`).then(r => r.json() as Promise<HexIdsFile>)
+            );
+
+        return Promise.all(hexFetches).then(parts => {
             if (hexIdsKeyRef.current !== key) return;
-            hexIdsRef.current = hdata.hexIds;
+            const merged: Record<string, string[]> = {};
+            for (const p of parts) Object.assign(merged, p.hexIds);
+            hexIdsRef.current = merged;
             setHexLoading(false);
             if (rows) pushHexes(rows);
           });
@@ -321,7 +328,7 @@ export default function App() {
       // Load both in parallel — scenarios is tiny so it resolves first
       const [slimRes, scenRes] = await Promise.all([
         fetch('/candidates-slim.json'),
-        fetch('/precomputed-drive-30.json'),
+        fetch('/precomputed-drive-60.json'),
       ]);
       const slim: SlimCandidate[]  = await slimRes.json();
       const scenData: ScenariosFile = await scenRes.json();
@@ -390,7 +397,7 @@ export default function App() {
       });
 
       mapReadyRef.current = true;
-      hexIdsKeyRef.current = 'drive-30';
+      hexIdsKeyRef.current = 'drive-60';
 
       // Show leaderboard immediately from scenarios
       const { N: n, transitOn: t } = paramsRef.current;
@@ -398,10 +405,10 @@ export default function App() {
 
       // Load hexids in background
       setHexLoading(true);
-      fetch('/precomputed-drive-30-hexids.json')
+      fetch('/precomputed-drive-60-hexids.json')
         .then(r => r.json() as Promise<HexIdsFile>)
         .then(hdata => {
-          if (hexIdsKeyRef.current !== 'drive-30') return;
+          if (hexIdsKeyRef.current !== 'drive-60') return;
           hexIdsRef.current = hdata.hexIds;
           setHexLoading(false);
           if (rows) pushHexes(rows);
@@ -458,7 +465,7 @@ export default function App() {
                 {!loading && hexLoading && <span className="ctrl-loading">loading map…</span>}
               </div>
               <div className="radius-group">
-                {([30, 60, 90] as Radius[]).map(r => (
+                {([15, 30, 45, 60, 90, 120] as Radius[]).map(r => (
                   <button key={r}
                     className={`radius-btn${radius === r ? ' active' : ''}`}
                     disabled={loading}
