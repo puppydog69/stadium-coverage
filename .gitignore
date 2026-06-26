@@ -28,3 +28,7 @@ dist-ssr
 data/kontur_population_US.gpkg
 data/kontur_population_US.gpkg.gz
 data/population-r8.json
+data/candidates-*.json
+data/candidates-union-*.json
+data/hex-pop*.json
+data/test-output.json

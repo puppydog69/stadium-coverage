@@ -68,7 +68,7 @@ interface DotProps {
 
 type ResultRow = ScenarioEntry & { rank: number; color: string; };
 
-type Radius = 15 | 30 | 60 | 90 | 120 | 150;
+type Radius = 15 | 30 | 60 | 90;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -458,7 +458,7 @@ export default function App() {
                 {!loading && hexLoading && <span className="ctrl-loading">loading map…</span>}
               </div>
               <div className="radius-group">
-                {([30, 60, 90, 120, 150] as Radius[]).map(r => (
+                {([30, 60, 90] as Radius[]).map(r => (
                   <button key={r}
                     className={`radius-btn${radius === r ? ' active' : ''}`}
                     disabled={loading}
