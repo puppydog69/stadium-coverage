@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import * as h3 from 'h3-js';
-import type { Feature, FeatureCollection, Point } from 'geojson';
+import type { FeatureCollection, Point } from 'geojson';
 import './App.css';
 
 // ---------------------------------------------------------------------------
@@ -58,9 +57,6 @@ interface ScenariosFile {
   hexidChunks?: number;
 }
 
-interface HexIdsFile {
-  hexIds: Record<string, string[]>;
-}
 
 interface DotProps {
   name: string; state: string; population: number; hexCount: number;
@@ -136,39 +132,6 @@ function buildDotGeoJSON(
   };
 }
 
-function buildHexGeoJSON(
-  selected: ResultRow[],
-  hexIds: Record<string, string[]>,
-): FeatureCollection {
-  const features: Feature[] = [];
-  for (const s of selected) {
-    const ids = hexIds[s.name] ?? [];
-    if (ids.length === 0) continue;
-    try {
-      // Merge all hexes into one MultiPolygon outline — O(20 features) instead of O(50k polygons)
-      const coords = h3.cellsToMultiPolygon(ids, true) as [number, number][][][];
-      if (coords.length === 0) continue;
-      features.push({
-        type: 'Feature',
-        geometry: { type: 'MultiPolygon', coordinates: coords },
-        properties: { color: s.color, rank: s.rank, name: s.name },
-      });
-    } catch {
-      // Fallback for any degenerate inputs
-      for (const hexId of ids) {
-        const boundary = h3.cellToBoundary(hexId);
-        const ring: [number, number][] = boundary.map(([lat, lng]) => [lng, lat]);
-        ring.push(ring[0]);
-        features.push({
-          type: 'Feature',
-          geometry: { type: 'Polygon', coordinates: [ring] },
-          properties: { color: s.color, rank: s.rank, name: s.name },
-        });
-      }
-    }
-  }
-  return { type: 'FeatureCollection', features };
-}
 
 function emptyFC(): FeatureCollection {
   return { type: 'FeatureCollection', features: [] };
@@ -202,13 +165,10 @@ export default function App() {
   const mapRef            = useRef<maplibregl.Map | null>(null);
   const popupRef          = useRef<maplibregl.Popup | null>(null);
   const slimCandidatesRef = useRef<SlimCandidate[] | null>(null);
-  // scenarios: loaded first (tiny file), drives leaderboard
   const scenariosRef      = useRef<Record<string, ScenarioEntry[]> | null>(null);
-  // hexIds: loaded after scenarios (big file), drives map hexes
-  const hexIdsRef         = useRef<Record<string, string[]>>({});
+  const workerRef         = useRef<Worker | null>(null);
   const mapReadyRef       = useRef(false);
   const paramsRef         = useRef({ N: 20, transitOn: false });
-  // Track which hexids file is currently loaded so we don't re-render stale hexes
   const hexIdsKeyRef      = useRef('');
 
   const [N, setN]                 = useState(20);
@@ -227,19 +187,21 @@ export default function App() {
     (map.getSource(SOURCE_DOTS) as maplibregl.GeoJSONSource).setData(buildDotGeoJSON(cands, rows));
   }, []);
 
-  // Push hex polygons to the map (only when hexIds are available)
-  const pushHexes = useCallback((rows: ResultRow[]) => {
-    const map = mapRef.current;
-    if (!map || !mapReadyRef.current) return;
-    (map.getSource(SOURCE_HEXES) as maplibregl.GeoJSONSource).setData(
-      buildHexGeoJSON(rows, hexIdsRef.current)
-    );
+  // Ask worker to build & push hex GeoJSON (off main thread)
+  const pushHexes = useCallback((rows: ResultRow[], key: string) => {
+    const worker = workerRef.current;
+    if (!worker) return;
+    worker.postMessage({
+      type: 'render',
+      key,
+      selected: rows.map(r => ({ name: r.name, color: r.color, rank: r.rank })),
+    });
   }, []);
 
   // Slice scenarios and update leaderboard + dots (instant — no hex rendering)
   const updateLeaderboard = useCallback((n: number, transit: boolean) => {
     const scenarios = scenariosRef.current;
-    if (!scenarios) return;
+    if (!scenarios) return null;
     const key    = transit ? 'transit' : 'off';
     const all    = scenarios[key] ?? [];
     const sliced = all.slice(0, n);
@@ -250,7 +212,7 @@ export default function App() {
     return rows;
   }, [pushDots]);
 
-  // Load a new mode+radius combination: scenarios first, then hexids in background
+  // Load a new mode+radius combination: scenarios first (instant), hexids via worker (background)
   const loadMode = useCallback((r: Radius, transit: boolean) => {
     const prefix = modePrefix(transit);
     const key    = `${prefix}-${r}`;
@@ -259,7 +221,6 @@ export default function App() {
     setHexLoading(true);
     setLoadError(null);
     setResults([]);
-    hexIdsRef.current  = {};
     hexIdsKeyRef.current = key;
 
     const map = mapRef.current;
@@ -274,24 +235,11 @@ export default function App() {
         scenariosRef.current = data.scenarios;
         setLoading(false);
         const { N: n, transitOn: t } = paramsRef.current;
-        const rows = updateLeaderboard(n, t);
+        updateLeaderboard(n, t);
 
-        // 2. Fetch hexids in background (may be chunked for large radii)
+        // 2. Tell worker to fetch + cache hexids, then render when done
         const chunks = data.hexidChunks ?? 1;
-        const hexFetches = chunks === 1
-          ? [fetch(`/precomputed-${key}-hexids.json`).then(r => r.json() as Promise<HexIdsFile>)]
-          : Array.from({ length: chunks }, (_, i) =>
-              fetch(`/precomputed-${key}-hexids-${i}.json`).then(r => r.json() as Promise<HexIdsFile>)
-            );
-
-        return Promise.all(hexFetches).then(parts => {
-            if (hexIdsKeyRef.current !== key) return;
-            const merged: Record<string, string[]> = {};
-            for (const p of parts) Object.assign(merged, p.hexIds);
-            hexIdsRef.current = merged;
-            setHexLoading(false);
-            if (rows) pushHexes(rows);
-          });
+        workerRef.current?.postMessage({ type: 'load', key, chunks });
       })
       .catch(err => {
         setLoading(false);
@@ -299,13 +247,13 @@ export default function App() {
         setLoadError(`${r}-min data unavailable`);
         console.error(err);
       });
-  }, [updateLeaderboard, pushHexes]);
+  }, [updateLeaderboard]);
 
-  // N slider change — update leaderboard+dots instantly, update hexes if already loaded
+  // N slider change — update leaderboard+dots instantly, re-render hexes if loaded
   useEffect(() => {
     paramsRef.current = { N, transitOn };
     const rows = updateLeaderboard(N, transitOn);
-    if (rows && !hexLoading) pushHexes(rows);
+    if (rows && !hexLoading) pushHexes(rows, hexIdsKeyRef.current);
   }, [N, updateLeaderboard, pushHexes, transitOn, hexLoading]);
 
   // Toggle rail overlay visibility with transit
@@ -323,6 +271,43 @@ export default function App() {
     if (!mapReadyRef.current) return;
     loadMode(radius, transitOn);
   }, [radius, transitOn, loadMode]);
+
+  // Initialize worker once
+  useEffect(() => {
+    const worker = new Worker(new URL('./hexWorker.ts', import.meta.url), { type: 'module' });
+    workerRef.current = worker;
+
+    worker.onmessage = (e: MessageEvent) => {
+      const msg = e.data;
+      if (msg.type === 'loaded') {
+        // Worker has hexids cached — now render current leaderboard
+        if (msg.key !== hexIdsKeyRef.current) return;
+        setHexLoading(false);
+        const { N: n, transitOn: t } = paramsRef.current;
+        const scenarios = scenariosRef.current;
+        if (!scenarios) return;
+        const scenKey = t ? 'transit' : 'off';
+        const all = scenarios[scenKey] ?? [];
+        const sliced = all.slice(0, n);
+        const colorMap = assignColors(sliced, PALETTE);
+        const rows = sliced.map((s, i) => ({ ...s, rank: i + 1, color: colorMap.get(s.name) ?? PALETTE[0] }));
+        pushHexes(rows, msg.key);
+      }
+      if (msg.type === 'geojson') {
+        if (msg.key !== hexIdsKeyRef.current) return;
+        const map = mapRef.current;
+        if (map && mapReadyRef.current) {
+          (map.getSource(SOURCE_HEXES) as maplibregl.GeoJSONSource).setData(msg.geojson);
+        }
+      }
+      if (msg.type === 'error') {
+        setHexLoading(false);
+        console.error('Worker error:', msg.error);
+      }
+    };
+
+    return () => { worker.terminate(); workerRef.current = null; };
+  }, [pushHexes]);
 
   // Initialize map once
   useEffect(() => {
@@ -414,19 +399,11 @@ export default function App() {
 
       // Show leaderboard immediately from scenarios
       const { N: n, transitOn: t } = paramsRef.current;
-      const rows = updateLeaderboard(n, t);
+      updateLeaderboard(n, t);
 
-      // Load hexids in background
+      // Worker fetches + caches hexids, posts 'loaded' when ready → triggers render
       setHexLoading(true);
-      fetch('/precomputed-drive-60-hexids.json')
-        .then(r => r.json() as Promise<HexIdsFile>)
-        .then(hdata => {
-          if (hexIdsKeyRef.current !== 'drive-60') return;
-          hexIdsRef.current = hdata.hexIds;
-          setHexLoading(false);
-          if (rows) pushHexes(rows);
-        })
-        .catch(() => setHexLoading(false));
+      workerRef.current?.postMessage({ type: 'load', key: 'drive-60', chunks: 1 });
     });
 
     return () => {
