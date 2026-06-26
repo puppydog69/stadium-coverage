@@ -143,15 +143,28 @@ function buildHexGeoJSON(
   const features: Feature[] = [];
   for (const s of selected) {
     const ids = hexIds[s.name] ?? [];
-    for (const hexId of ids) {
-      const boundary = h3.cellToBoundary(hexId);
-      const ring: [number, number][] = boundary.map(([lat, lng]) => [lng, lat]);
-      ring.push(ring[0]);
+    if (ids.length === 0) continue;
+    try {
+      // Merge all hexes into one MultiPolygon outline — O(20 features) instead of O(50k polygons)
+      const coords = h3.cellsToMultiPolygon(ids, true) as [number, number][][][];
+      if (coords.length === 0) continue;
       features.push({
         type: 'Feature',
-        geometry: { type: 'Polygon', coordinates: [ring] },
+        geometry: { type: 'MultiPolygon', coordinates: coords },
         properties: { color: s.color, rank: s.rank, name: s.name },
       });
+    } catch {
+      // Fallback for any degenerate inputs
+      for (const hexId of ids) {
+        const boundary = h3.cellToBoundary(hexId);
+        const ring: [number, number][] = boundary.map(([lat, lng]) => [lng, lat]);
+        ring.push(ring[0]);
+        features.push({
+          type: 'Feature',
+          geometry: { type: 'Polygon', coordinates: [ring] },
+          properties: { color: s.color, rank: s.rank, name: s.name },
+        });
+      }
     }
   }
   return { type: 'FeatureCollection', features };
