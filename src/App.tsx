@@ -16,24 +16,29 @@ const LAYER_HEX_STROKE  = 'hex-stroke';
 const LAYER_SEL_GLOW    = 'selected-glow';
 const LAYER_UNSELECTED  = 'unselected-circle';
 const LAYER_SELECTED    = 'selected-circle';
-const SOURCE_RAIL       = 'rail-overlay';
-const LAYER_RAIL        = 'rail-lines';
-
 const US_POPULATION = 335_000_000;
 
 const PALETTE = [
-  '#ff4d6d',
-  '#00d2ff',
-  '#ffe94d',
-  '#7c3aff',
-  '#00e5a0',
-  '#ff8c00',
-  '#e040fb',
-  '#00bfff',
-  '#ff6b35',
-  '#39ff14',
-  '#ff1493',
-  '#00fff5',
+  '#FF4545',  // red
+  '#FF9500',  // orange
+  '#FFE434',  // yellow
+  '#A8FF3E',  // lime
+  '#00F5A0',  // mint
+  '#00D4FF',  // cyan
+  '#3D8BFF',  // blue
+  '#9B5FFF',  // violet
+  '#FF3DDB',  // magenta
+  '#FF6B6B',  // coral
+  '#FFB347',  // peach
+  '#BAFF29',  // chartreuse
+  '#00FFC8',  // aqua
+  '#18A0FB',  // azure
+  '#7C3AED',  // purple
+  '#F472B6',  // pink
+  '#FB7185',  // rose
+  '#34D399',  // emerald
+  '#60A5FA',  // periwinkle
+  '#FCD34D',  // gold
 ];
 
 const NEARBY_KM = 300;
@@ -260,13 +265,6 @@ export default function App() {
     if (rows && !hexLoading) pushHexes(rows, hexIdsKeyRef.current);
   }, [N, updateLeaderboard, pushHexes, transitOn, hexLoading]);
 
-  // Toggle rail overlay visibility with transit
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapReadyRef.current) return;
-    map.setLayoutProperty(LAYER_RAIL, 'visibility', transitOn ? 'visible' : 'none');
-  }, [transitOn]);
-
   // Radius or transit toggle — reload files
   const isFirstRender = useRef(true);
   useEffect(() => {
@@ -337,21 +335,6 @@ export default function App() {
 
       slimCandidatesRef.current = slim;
       scenariosRef.current      = scenData.scenarios;
-
-      // Rail overlay (OpenRailwayMap) — shown when transit is on
-      map.addSource(SOURCE_RAIL, {
-        type: 'raster',
-        tiles: ['https://tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png'],
-        tileSize: 256,
-        attribution: '© OpenRailwayMap contributors',
-      });
-      map.addLayer({
-        id: LAYER_RAIL,
-        type: 'raster',
-        source: SOURCE_RAIL,
-        layout: { visibility: 'none' },
-        paint: { 'raster-opacity': 0.55 },
-      });
 
       map.addSource(SOURCE_HEXES, { type: 'geojson', data: emptyFC() });
       map.addLayer({ id: LAYER_HEX_FILL, type: 'fill', source: SOURCE_HEXES,
