@@ -99,7 +99,11 @@ function assignColors(entries: ScenarioEntry[], palette: string[]): Map<string, 
         blocked.add(c);
       }
     }
-    const color = palette.find(p => !blocked.has(p)) ?? palette[i % palette.length];
+    // Cycle through palette by rank; only skip if blocked by a nearby venue
+    const preferred = palette[i % palette.length];
+    const color = blocked.has(preferred)
+      ? (palette.find(p => !blocked.has(p)) ?? preferred)
+      : preferred;
     colorMap.set(s.name, color);
   }
   return colorMap;
