@@ -504,7 +504,7 @@ export default function App() {
               <div className="lb-heading">Ranked Selections</div>
               <div className="lb-list">
                 {resultsWithCum.map(r => (
-                  <div className="lb-row" key={r.name}>
+                  <div className="lb-row" key={r.name} onClick={() => mapRef.current?.flyTo({ center: [r.lon, r.lat], zoom: 11, duration: 1000 })} style={{ cursor: 'pointer' }}>
                     <div className="lb-accent" style={{ background: r.color }} />
                     <span className="lb-rank">#{r.rank}</span>
                     <div className="lb-info">
