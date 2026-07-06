@@ -21,7 +21,7 @@
   top: 0;
   left: 0;
   bottom: 0;
-  width: 300px;
+  width: 320px;
   z-index: 10;
   display: flex;
   flex-direction: column;
@@ -145,14 +145,14 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .radius-btn {
   flex: 1;
-  padding: 6px 4px;
-  font-size: 12px;
+  padding: 6px 2px;
+  font-size: 11px;
   font-family: 'Inter', sans-serif;
   font-weight: 500;
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.04);
-  color: rgba(200, 210, 230, 0.55);
+  color: rgba(200, 210, 230, 0.7);
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -296,7 +296,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .stat-label {
   font-size: 10px;
-  color: rgba(180, 190, 220, 0.45);
+  color: rgba(180, 190, 220, 0.6);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -354,7 +354,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .lb-rank {
   font-size: 11px;
   font-weight: 700;
-  color: rgba(200, 210, 240, 0.45);
+  color: rgba(200, 210, 240, 0.6);
   text-align: right;
   font-variant-numeric: tabular-nums;
   padding-left: 6px;
@@ -378,7 +378,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .lb-meta {
   font-size: 10px;
-  color: rgba(180, 190, 220, 0.4);
+  color: rgba(180, 190, 220, 0.55);
   display: flex;
   gap: 6px;
 }
@@ -388,7 +388,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 
 .lb-hexcount {
-  color: rgba(180, 190, 220, 0.3);
+  color: rgba(180, 190, 220, 0.45);
 }
 
 .lb-pops {
@@ -409,7 +409,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .lb-cum {
   font-size: 10px;
-  color: rgba(180, 190, 220, 0.35);
+  color: rgba(180, 190, 220, 0.5);
   font-variant-numeric: tabular-nums;
 }
 

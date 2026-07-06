@@ -431,7 +431,7 @@ export default function App() {
                 <span>Venues</span>
                 <span className="ctrl-value">{N}</span>
               </div>
-              <input type="range" min={5} max={50} step={1} value={N}
+              <input type="range" min={5} max={100} step={1} value={N}
                 onChange={e => setN(Number(e.target.value))} />
             </div>
 
@@ -492,7 +492,7 @@ export default function App() {
                 </div>
               </div>
               {worst && worst !== best && (
-                <div style={{ fontSize: 10, color: 'rgba(180,190,220,0.35)', textAlign: 'right', marginTop: -2 }}>
+                <div style={{ fontSize: 10, color: 'rgba(180,190,220,0.5)', textAlign: 'right', marginTop: -2 }}>
                   Least efficient: {worst.name} (+{fmtPop(worst.incrementalPopulation)})
                 </div>
               )}

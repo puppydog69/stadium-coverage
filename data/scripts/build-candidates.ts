@@ -1,14 +1,17 @@
 import * as dotenv from "dotenv";
 import * as fs from "fs";
 import * as path from "path";
-import { getIsochroneHexes } from "./isochrone.js";
+import { getIsochroneHexes } from "./isochrone.ts";
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 
-const MINUTES = 15;
+const argMin = process.argv.slice(2).map(Number).find(n => n > 0);
+const MINUTES = argMin ?? 15;
 const DELAY_MS = 300;
 const SAVE_EVERY = 50;
-const OUT_PATH = path.resolve(process.cwd(), "data/candidates.json");
+const OUT_PATH = MINUTES === 15
+  ? path.resolve(process.cwd(), "public/candidates.json")
+  : path.resolve(process.cwd(), `data/candidates-${MINUTES}.json`);
 const POP_PATH = path.resolve(process.cwd(), "data/population-r8.json");
 
 interface Candidate { name: string; state: string; lat: number; lon: number; }
@@ -500,7 +503,7 @@ async function main() {
   console.log(`\nDone. ${completed.size} candidates → ${OUT_PATH} (${sizeMB} MB)`);
 
   const results = [...completed.values()].sort((a, b) => b.population - a.population);
-  console.log(`\nTop 10 by 15-min driving population:`);
+  console.log(`\nTop 10 by ${MINUTES}-min driving population:`);
   results.slice(0, 10).forEach((r, i) => {
     console.log(`  ${i + 1}. ${r.name.padEnd(40)} ${r.population.toLocaleString().padStart(10)}`);
   });

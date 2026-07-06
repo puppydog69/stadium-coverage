@@ -84,7 +84,7 @@ function candFile(radius: number): string {
 
 async function processRadius(radius: number, mode: 'drive' | 'transit') {
   const isTransit = mode === 'transit';
-  const src = isTransit ? `data/candidates-union-${radius}.json` : candFile(radius);
+  const src = isTransit ? `data/candidates-transit-${radius}.json` : candFile(radius);
   const pop = isTransit && radius > 60 ? 'data/population-r8.json' : popFile(radius);
 
   if (!existsSync(src)) throw new Error(`Missing ${src} — run data generation first`);
@@ -117,7 +117,7 @@ async function processRadius(radius: number, mode: 'drive' | 'transit') {
 
 async function main() {
   const args = process.argv.slice(2).map(Number).filter(n => n > 0);
-  const allRadii = [15, 30, 45, 60, 90, 120, 150];
+  const allRadii = [10, 15, 30, 45, 60, 90, 120];
   const radii = args.length > 0 ? args : allRadii;
 
   if (!args.length) {

@@ -1,17 +1,21 @@
 /**
- * Build union isochrone candidates: for each of the 326 venues, merge the
- * driving hex set (already computed) with the public_transport hex set from
- * TravelTime. Population is recomputed from the union hex set.
+ * Build transit-only isochrone candidates: for each venue, fetch the
+ * public_transport isochrone from TravelTime (walking + buses + rail —
+ * no cars). Population is computed from the transit hex set only.
  *
  * Outputs:
- *   public/candidates-union-15.json
- *   public/candidates-union-30.json
- *   public/candidates-union-60.json
+ *   data/candidates-transit-15.json
+ *   data/candidates-transit-30.json
+ *   data/candidates-transit-45.json
+ *   data/candidates-transit-60.json
+ *   data/candidates-transit-90.json
+ *   data/candidates-transit-120.json
  *
  * Supports resume-on-interrupt — already completed candidates are skipped.
  *
  * Usage:
- *   node --experimental-strip-types data/scripts/build-candidates-union.ts
+ *   node --experimental-strip-types data/scripts/build-candidates-union.ts [radii...]
+ *   e.g. node --experimental-strip-types data/scripts/build-candidates-union.ts 45 90
  */
 
 import * as dotenv from "dotenv";
@@ -30,7 +34,7 @@ interface Candidate {
 }
 
 function outPath(minutes: number) {
-  return path.resolve(process.cwd(), `data/candidates-union-${minutes}.json`);
+  return path.resolve(process.cwd(), `data/candidates-transit-${minutes}.json`);
 }
 
 function save(results: Candidate[], minutes: number) {
@@ -40,7 +44,7 @@ function save(results: Candidate[], minutes: number) {
 
 async function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
-async function buildUnion(
+async function buildTransit(
   sources: Candidate[],
   popLookup: Record<string, number>,
   minutes: number,
@@ -51,38 +55,31 @@ async function buildUnion(
   if (fs.existsSync(out)) {
     const prev = JSON.parse(fs.readFileSync(out, "utf8")) as Candidate[];
     for (const r of prev) completed.set(r.name, r);
-    console.log(`[union-${minutes}min] Resuming: ${completed.size} / ${sources.length} done.`);
+    console.log(`[transit-${minutes}min] Resuming: ${completed.size} / ${sources.length} done.`);
   } else {
-    console.log(`[union-${minutes}min] Starting fresh — ${sources.length} candidates.`);
+    console.log(`[transit-${minutes}min] Starting fresh — ${sources.length} candidates.`);
   }
 
   const todo = sources.filter(c => !completed.has(c.name));
   if (todo.length === 0) {
-    console.log(`[union-${minutes}min] Already complete.\n`);
+    console.log(`[transit-${minutes}min] Already complete.\n`);
     save([...completed.values()], minutes);
     return;
   }
 
-  console.log(`[union-${minutes}min] ${todo.length} remaining.\n`);
+  console.log(`[transit-${minutes}min] ${todo.length} remaining.\n`);
   let batch = 0;
 
   for (let i = 0; i < todo.length; i++) {
     const src = todo[i];
 
-    // Driving hexes already computed — use as base
-    const drivingHexes = new Set<string>(src.hexIds);
-
-    // Fetch transit isochrone and union
-    let transitHexes: string[] = [];
+    let hexIds: string[] = [];
     try {
-      transitHexes = await getTransitIsochroneHexes(src.lat, src.lon, minutes);
+      hexIds = await getTransitIsochroneHexes(src.lat, src.lon, minutes);
     } catch (err) {
       console.error(`  TRANSIT ERROR [${src.name}]: ${(err as Error).message}`);
     }
 
-    const unionSet = new Set<string>(drivingHexes);
-    for (const h of transitHexes) unionSet.add(h);
-    const hexIds    = [...unionSet];
     const population = hexIds.reduce((sum, h) => sum + (popLookup[h] ?? 0), 0);
 
     completed.set(src.name, {
@@ -96,12 +93,9 @@ async function buildUnion(
 
     if (batch % 10 === 0 || i === todo.length - 1) {
       const pct = ((done / total) * 100).toFixed(0);
-      const r   = completed.get(src.name)!;
-      const transit = transitHexes.length;
-      const driving = drivingHexes.size;
       console.log(
-        `[union-${minutes}min] [${done}/${total} ${pct}%] ${src.name.padEnd(42)} ` +
-        `drive:${driving} + transit:${transit} → union:${r.hexCount}  pop:${r.population.toLocaleString()}`
+        `[transit-${minutes}min] [${done}/${total} ${pct}%] ${src.name.padEnd(42)} ` +
+        `transit:${hexIds.length}  pop:${population.toLocaleString()}`
       );
     }
 
@@ -115,7 +109,7 @@ async function buildUnion(
 
   save([...completed.values()], minutes);
   const mb = (fs.statSync(out).size / 1_048_576).toFixed(1);
-  console.log(`\n[union-${minutes}min] Done → ${out} (${mb} MB)\n`);
+  console.log(`\n[transit-${minutes}min] Done → ${out} (${mb} MB)\n`);
 }
 
 async function main() {
@@ -123,22 +117,25 @@ async function main() {
     console.error("TRAVELTIME_APP_ID not set"); process.exit(1);
   }
 
-  console.log("Loading population lookup (hex-pop.json for 15-min base)...");
-  // Use the full population-r8.json so union hexes (which may go beyond
-  // any single radius's filtered set) can be scored correctly.
+  const args = process.argv.slice(2).map(Number).filter(n => n > 0);
+  const allRadii = [15, 30, 45, 60, 90, 120];
+  const radii = args.length > 0 ? args : allRadii;
+
+  console.log("Loading population lookup...");
   const popLookup: Record<string, number> =
     JSON.parse(fs.readFileSync("data/population-r8.json", "utf8"));
   console.log(`${Object.keys(popLookup).length.toLocaleString()} hex entries loaded.\n`);
 
-  for (const minutes of [15, 30, 60] as const) {
+  for (const minutes of radii) {
     const srcFile = minutes === 15
       ? "public/candidates.json"
       : `data/candidates-${minutes}.json`;
+    if (!fs.existsSync(srcFile)) { console.warn(`Skipping ${minutes}min — ${srcFile} missing`); continue; }
     const sources: Candidate[] = JSON.parse(fs.readFileSync(srcFile, "utf8"));
-    await buildUnion(sources, popLookup, minutes);
+    await buildTransit(sources, popLookup, minutes);
   }
 
-  console.log("All union radii complete.");
+  console.log("All transit radii complete.");
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
